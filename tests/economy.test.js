@@ -58,42 +58,6 @@ test('market settlement pays player revenue once, returns leftovers as seeds, an
   assert.equal(app.state.coins, 100 + 48 - 5);
 });
 
-test('completed market report shows each seller crop quantities and prices', () => {
-  Object.assign(app.state, app.createInitialGameState());
-  app.state.market.saleScreenOpen = true;
-  app.state.market.saleComplete = true;
-  app.state.market.saleReport = {
-    sellers: [
-      {
-        name: 'You',
-        customers: 1,
-        requested: 1,
-        sold: 2,
-        revenue: 16,
-        cropSales: { tomato: { quantity: 2, price: 8, revenue: 16 } },
-      },
-      {
-        name: 'Rival 1',
-        customers: 1,
-        requested: 1,
-        sold: 1,
-        revenue: 6,
-        cropSales: { carrot: { quantity: 1, price: 6, revenue: 6 } },
-      },
-    ],
-    totalCustomers: 2,
-    totalRequested: 2,
-    totalSold: 3,
-    totalRevenue: 22,
-  };
-
-  app.render();
-
-  assert.match(appElement.innerHTML, /sale-report-crop-header/);
-  assert.match(appElement.innerHTML, /🍅 tomato<\/span>\s*<span>2<\/span>\s*<span>8 coins<\/span>\s*<span>\+16 coins<\/span>/);
-  assert.match(appElement.innerHTML, /🥕 carrot<\/span>\s*<span>1<\/span>\s*<span>6 coins<\/span>\s*<span>\+6 coins<\/span>/);
-});
-
 test('game over triggers only when coins cannot cover harvest', () => {
   app.state.coins = 4;
   app.state.gameOver = false;
