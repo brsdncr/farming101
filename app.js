@@ -556,6 +556,7 @@ function buildMarketCustomerSimulation(profile, selectedCrops) {
     sold: 0,
     revenue: 0,
     crops: {},
+    cropSales: {},
   }];
 
   for (let index = 0; index < profile.competitors; index += 1) {
@@ -566,6 +567,7 @@ function buildMarketCustomerSimulation(profile, selectedCrops) {
       sold: 0,
       revenue: 0,
       crops: {},
+      cropSales: {},
     });
   }
 
@@ -618,6 +620,12 @@ function buildMarketCustomerSimulation(profile, selectedCrops) {
       seller.sold += sold;
       seller.revenue += revenue;
       seller.crops[crop] = (seller.crops[crop] ?? 0) + sold;
+      if (sold > 0) {
+        const cropSale = seller.cropSales[crop] ?? { quantity: 0, price, revenue: 0 };
+        cropSale.quantity += sold;
+        cropSale.revenue += revenue;
+        seller.cropSales[crop] = cropSale;
+      }
 
       events.push({
         id: `${seller.name.toLowerCase()}-${seller.customers}`,
@@ -1499,12 +1507,33 @@ function renderSaleSimulationScreen() {
                 <span>Revenue</span>
               </div>
               ${report.sellers.map((seller) => `
-                <div class="sale-report-row">
-                  <span>${seller.name}</span>
-                  <span>${seller.customers}</span>
-                  <span>${seller.requested}</span>
-                  <span>${seller.sold}</span>
-                  <span>+$${seller.revenue}</span>
+                <div class="sale-report-seller">
+                  <div class="sale-report-row">
+                    <span>${seller.name}</span>
+                    <span>${seller.customers}</span>
+                    <span>${seller.requested}</span>
+                    <span>${seller.sold}</span>
+                    <span>+$${seller.revenue}</span>
+                  </div>
+                  <div class="sale-report-crops">
+                    <strong>${seller.name} crop sales</strong>
+                    ${Object.entries(seller.cropSales ?? {}).length > 0 ? `
+                      <div class="sale-report-crop-header">
+                        <span>Crop</span>
+                        <span>Sold</span>
+                        <span>Unit price</span>
+                        <span>Revenue</span>
+                      </div>
+                      ${Object.entries(seller.cropSales).map(([crop, sale]) => `
+                        <div class="sale-report-crop-row">
+                          <span>${CROP_EMOJIS[crop] ?? '🌱'} ${crop}</span>
+                          <span>${sale.quantity}</span>
+                          <span>${sale.price} coins</span>
+                          <span>+${sale.revenue} coins</span>
+                        </div>
+                      `).join('')}
+                    ` : '<span>No crops sold</span>'}
+                  </div>
                 </div>
               `).join('')}
               <div class="sale-report-total">
