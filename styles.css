@@ -938,6 +938,11 @@ h1, h2 {
   border-radius: 12px;
 }
 
+.sale-report-seller {
+  display: grid;
+  gap: 4px;
+}
+
 .sale-report-header,
 .sale-report-row,
 .sale-report-total {
@@ -963,6 +968,41 @@ h1, h2 {
 
 .sale-report-total {
   font-weight: 700;
+  color: var(--text);
+}
+
+.sale-report-crops {
+  display: grid;
+  gap: 4px;
+  padding: 2px 0 8px;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.sale-report-crops strong {
+  color: var(--text);
+}
+
+.sale-report-crop-header,
+.sale-report-crop-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 1.4fr) repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  align-items: center;
+}
+
+.sale-report-crop-header {
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sale-report-crop-row {
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
   color: var(--text);
 }
 

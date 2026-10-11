@@ -66,6 +66,39 @@ export const MARKET_LOCATIONS = {
   city: { label: 'City', entryFee: 250, trafficMin: 1000, trafficMax: 5000, competitors: 3 },
 };
 
+export const MARKET_RIVAL_STAGES = {
+  village: {
+    productPool: ['tomato', 'carrot', 'pumpkin', 'beetroot'],
+    maxProducts: 3,
+    stockCapacity: 30,
+  },
+  town: {
+    productPool: ['tomato', 'carrot', 'pumpkin', 'onion', 'beetroot', 'cherry'],
+    maxProducts: 5,
+    stockCapacity: 100,
+  },
+  city: {
+    productPool: CROP_KEYS,
+    maxProducts: CROP_KEYS.length,
+    stockCapacity: 300,
+  },
+};
+
+export const MARKET_DEMAND_WEIGHTS = {
+  village: { tomato: 5, carrot: 4, pumpkin: 1, beetroot: 1 },
+  town: { tomato: 4, carrot: 3, pumpkin: 2, onion: 1, beetroot: 2, cherry: 1 },
+  city: {
+    tomato: 3,
+    carrot: 3,
+    pumpkin: 2,
+    onion: 2,
+    beetroot: 2,
+    cherry: 2,
+    watermelon: 1,
+    eggplant: 1,
+  },
+};
+
 export const SEED_UPGRADE_COST_BY_LEVEL = Object.fromEntries(
   Array.from({ length: 9 }, (_, index) => [index + 2, (index + 1) * 10]),
 );

@@ -4,7 +4,9 @@ import {
   CROP_EMOJIS,
   CROP_KEYS,
   CROP_SEED_CONFIG,
+  MARKET_DEMAND_WEIGHTS,
   MARKET_LOCATIONS,
+  MARKET_RIVAL_STAGES,
   SEED_UPGRADE_COST_BY_LEVEL,
 } from './src/config/crops.js';
 import { SHAPE_DEFINITIONS, SHAPE_TYPES } from './src/config/shapes.js';
@@ -544,11 +546,223 @@ function runMarketSimulation() {
   render();
 }
 
-function randomMarketCount(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+function randomMarketCount(min, max, random = Math.random) {
+  return Math.floor(random() * (max - min + 1)) + min;
 }
 
-function buildMarketCustomerSimulation(profile, selectedCrops) {
+function weightedRandomEntry(weights, random) {
+  const entries = Object.entries(weights).filter(([, weight]) => Number(weight) > 0);
+  const totalWeight = entries.reduce((sum, [, weight]) => sum + Number(weight), 0);
+
+  if (totalWeight <= 0) {
+    return null;
+  }
+
+  let target = random() * totalWeight;
+  for (const [key, weight] of entries) {
+    target -= Number(weight);
+    if (target < 0) {
+      return key;
+    }
+  }
+
+  return entries.at(-1)?.[0] ?? null;
+}
+
+const RIVAL_ARCHETYPES = [
+  { name: 'General', assortmentOffset: 1, stockFactor: 0.9, priceMin: 0.9, priceMax: 1.1 },
+  { name: 'Specialist', assortmentOffset: -1, stockFactor: 1.2, priceMin: 0.95, priceMax: 1.15 },
+  { name: 'Discount', assortmentOffset: 0, stockFactor: 1, priceMin: 0.8, priceMax: 1 },
+];
+
+function buildMarketCustomerSimulation(profile, selectedCrops, options = {}) {
+  const random = options.random ?? Math.random;
+  const stage = MARKET_RIVAL_STAGES[state.market.location] ?? MARKET_RIVAL_STAGES.village;
+  const demandWeights = MARKET_DEMAND_WEIGHTS[state.market.location] ?? MARKET_DEMAND_WEIGHTS.village;
+  const baseDemand = Object.values(demandWeights).reduce((sum, weight) => sum + weight, 0);
+  const traffic = randomMarketCount(profile.trafficMin, profile.trafficMax, random);
+  const sellers = [{
+    name: 'You',
+    archetype: 'Player',
+    customers: 0,
+    requested: 0,
+    sold: 0,
+    revenue: 0,
+    crops: {},
+    cropSales: {},
+    assortment: {},
+  }];
+
+  const unlockedProductCount = CROP_KEYS.filter((crop) => getCropSeedLevel(crop) > 0).length;
+  const averageTraffic = (profile.trafficMin + profile.trafficMax) / 2;
+  const rivalCount = Math.max(0, Math.floor(profile.competitors));
+  for (let rivalIndex = 0; rivalIndex < rivalCount; rivalIndex += 1) {
+    const archetype = RIVAL_ARCHETYPES[rivalIndex % RIVAL_ARCHETYPES.length];
+    const eligibleCrops = stage.productPool;
+    const maximumAssortment = Math.min(stage.maxProducts, eligibleCrops.length);
+    const minimumSize = archetype.name === 'Specialist'
+      ? 1
+      : Math.max(1, Math.min(maximumAssortment, unlockedProductCount + archetype.assortmentOffset - 1));
+    const maximumSize = archetype.name === 'Specialist'
+      ? 1
+      : Math.max(minimumSize, Math.min(maximumAssortment, unlockedProductCount + archetype.assortmentOffset + 1));
+    const assortmentSize = randomMarketCount(minimumSize, maximumSize, random);
+    const unselectedCrops = [...eligibleCrops];
+    const assortment = {};
+
+    for (let productIndex = 0; productIndex < assortmentSize && unselectedCrops.length > 0; productIndex += 1) {
+      const cropIndex = Math.floor(random() * unselectedCrops.length);
+      const crop = unselectedCrops.splice(cropIndex, 1)[0];
+      const referencePrice = CROP_BASE_PRICES[crop] ?? 10;
+      const priceMultiplier = archetype.priceMin + random() * (archetype.priceMax - archetype.priceMin);
+      const price = Math.max(1, Math.round(referencePrice * priceMultiplier));
+      const cropDemand = Number(demandWeights[crop] ?? 0) / baseDemand;
+      const expectedDemand = averageTraffic * cropDemand * archetype.stockFactor;
+      const stockVariation = 0.75 + random() * 0.5;
+      const stock = Math.max(1, Math.round(expectedDemand * stockVariation));
+
+      assortment[crop] = {
+        price,
+        stock: Math.min(stock, stage.stockCapacity),
+        initialStock: Math.min(stock, stage.stockCapacity),
+      };
+    }
+
+    let remainingCapacity = stage.stockCapacity;
+    for (const offer of Object.values(assortment)) {
+      offer.stock = Math.min(offer.stock, remainingCapacity);
+      offer.initialStock = offer.stock;
+      remainingCapacity -= offer.stock;
+    }
+
+    sellers.push({
+      name: `Rival ${rivalIndex + 1}`,
+      archetype: archetype.name,
+      customers: 0,
+      requested: 0,
+      sold: 0,
+      revenue: 0,
+      crops: {},
+      cropSales: {},
+      assortment,
+    });
+  }
+
+  for (const crop of selectedCrops) {
+    const offeredStock = Math.min(
+      Math.max(0, Number(state.market.selectedQuantities[crop] ?? 0)),
+      Math.max(0, Number(state.cropInventory[crop] ?? 0)),
+    );
+    if (offeredStock > 0) {
+      sellers[0].assortment[crop] = {
+        price: Math.max(1, Number(state.market.prices[crop] ?? CROP_BASE_PRICES[crop] ?? 5)),
+        stock: offeredStock,
+        initialStock: offeredStock,
+      };
+    }
+  }
+
+  const customerNeeds = Array.from({ length: traffic }, () => weightedRandomEntry(demandWeights, random));
+  const events = [];
+
+  for (let customerIndex = 0; customerIndex < customerNeeds.length; customerIndex += 1) {
+    const crop = customerNeeds[customerIndex];
+    const referencePrice = CROP_BASE_PRICES[crop] ?? 10;
+    const budget = referencePrice * (1.2 + random() * 0.6);
+    const optionsForPurchase = [];
+
+    for (const seller of sellers) {
+      const offer = seller.assortment[crop];
+      if (!offer) {
+        continue;
+      }
+
+      seller.requested += 1;
+      if (offer.stock <= 0 || offer.price > budget
+        || (seller === sellers[0] && offer.price > getMaxReasonablePrice(crop))) {
+        continue;
+      }
+
+      seller.customers += 1;
+      optionsForPurchase.push({
+        seller,
+        offer,
+        weight: Math.exp(-2 * (offer.price / referencePrice - 0.8)),
+      });
+    }
+
+    const noPurchaseWeight = 0.55;
+    const totalWeight = noPurchaseWeight + optionsForPurchase.reduce((sum, option) => sum + option.weight, 0);
+    let choice = random() * totalWeight;
+    let purchasedOption = null;
+
+    for (const option of optionsForPurchase) {
+      choice -= option.weight;
+      if (choice < 0) {
+        purchasedOption = option;
+        break;
+      }
+    }
+
+    let sold = 0;
+    let revenue = 0;
+    let sellerName = null;
+    let sellerKey = null;
+    let table = 'market';
+    let price = 0;
+
+    if (purchasedOption) {
+      const { seller, offer } = purchasedOption;
+      offer.stock -= 1;
+      seller.sold += 1;
+      seller.revenue += offer.price;
+      seller.crops[crop] = (seller.crops[crop] ?? 0) + 1;
+      const cropSale = seller.cropSales[crop] ?? { quantity: 0, price: offer.price, revenue: 0 };
+      cropSale.quantity += 1;
+      cropSale.revenue += offer.price;
+      seller.cropSales[crop] = cropSale;
+      sold = 1;
+      revenue = offer.price;
+      sellerName = seller.name;
+      sellerKey = seller === sellers[0] ? 'you' : `rival-${sellers.indexOf(seller)}`;
+      table = seller === sellers[0] ? 'you' : sellerKey;
+      price = offer.price;
+    }
+
+    events.push({
+      id: `customer-${customerIndex + 1}`,
+      sellerName,
+      sellerKey,
+      table,
+      side: customerIndex % 2 === 0 ? 'left' : 'right',
+      crop,
+      wantedCrop: crop,
+      emoji: CROP_EMOJIS[crop] ?? '🌱',
+      customerIndex: customerIndex + 1,
+      requested: 1,
+      offered: optionsForPurchase.length > 0,
+      sold,
+      revenue,
+      price,
+    });
+  }
+
+  const totalRequested = sellers.reduce((sum, seller) => sum + seller.requested, 0);
+  const totalSold = sellers.reduce((sum, seller) => sum + seller.sold, 0);
+  const totalRevenue = sellers.reduce((sum, seller) => sum + seller.revenue, 0);
+
+  return {
+    sellers,
+    events,
+    customerNeeds,
+    totalCustomers: traffic,
+    totalRequested,
+    totalSold,
+    totalRevenue,
+  };
+}
+
+function buildSaleReport(profile, selectedCrops) {
   const sellers = [{
     name: 'You',
     customers: 0,
@@ -653,16 +867,16 @@ function buildMarketCustomerSimulation(profile, selectedCrops) {
   return { sellers, events, totalCustomers, totalRequested, totalSold, totalRevenue };
 }
 
-function buildSaleReport(profile, selectedCrops) {
-  const simulation = buildMarketCustomerSimulation(profile, selectedCrops);
-  return {
-    sellers: simulation.sellers,
-    totalCustomers: simulation.totalCustomers,
-    totalRequested: simulation.totalRequested,
-    totalSold: simulation.totalSold,
-    totalRevenue: simulation.totalRevenue,
-  };
-}
+// function buildSaleReport(profile, selectedCrops) {
+//   const simulation = buildMarketCustomerSimulation(profile, selectedCrops);
+//   return {
+//     sellers: simulation.sellers,
+//     totalCustomers: simulation.totalCustomers,
+//     totalRequested: simulation.totalRequested,
+//     totalSold: simulation.totalSold,
+//     totalRevenue: simulation.totalRevenue,
+//   };
+// }
 
 function finalizeMarketSimulation(profile, simulation, selectedCrops) {
   if (!state.market.simulating || state.market.activeSimulation !== simulation) {
@@ -769,7 +983,9 @@ function startSelling() {
     state.market.currentCustomerIndex = nextIndex;
     state.market.lastSummary = event.sold
       ? `${event.sellerName} sold ${event.crop} for +$${event.revenue}.`
-      : `${event.sellerName} customer passed on ${event.crop}.`;
+      : event.offered
+        ? `A customer passed on ${event.crop}.`
+        : `A customer wanted ${event.crop}, but no store could fulfill the demand.`;
 
     render();
 
@@ -1464,7 +1680,7 @@ function renderSaleSimulationScreen() {
             ${visibleEvents.map((event, index) => {
               const isPlayerCustomer = event.table === 'you';
               const startX = event.side === 'left' ? cinematicStart : (event.side === 'right' ? '118%' : '-18%');
-              const endX = isPlayerCustomer ? 30 : 70;
+              const endX = event.table === 'market' ? 50 : (isPlayerCustomer ? 30 : 70);
               const startY = isPlayerCustomer ? 18 + (index % 3) * 8 : 18 + (index % 3) * 15;
               const endY = isPlayerCustomer ? 65 : 60;
               const customerClass = isPlayerCustomer ? 'customer from-left' : 'customer from-right';
@@ -1478,7 +1694,7 @@ function renderSaleSimulationScreen() {
               `;
             }).join('')}
             ${visibleEvents.filter((event) => event.sold).map((event) => {
-              const left = event.table === 'you' ? 30 : 70;
+              const left = event.table === 'you' ? 30 : (event.table === 'market' ? 50 : 70);
               return `<div class="float-gain sale-gain" style="left:${left}%; top:20%;">💰 +$${event.revenue}</div>`;
             }).join('')}
           </div>
@@ -1499,12 +1715,40 @@ function renderSaleSimulationScreen() {
                 <span>Revenue</span>
               </div>
               ${report.sellers.map((seller) => `
-                <div class="sale-report-row">
-                  <span>${seller.name}</span>
-                  <span>${seller.customers}</span>
-                  <span>${seller.requested}</span>
-                  <span>${seller.sold}</span>
-                  <span>+$${seller.revenue}</span>
+                <div class="sale-report-seller">
+                  <div class="sale-report-row">
+                    <span>${seller.name}</span>
+                    <span>${seller.customers}</span>
+                    <span>${seller.requested}</span>
+                    <span>${seller.sold}</span>
+                    <span>+$${seller.revenue}</span>
+                  </div>
+                  ${Object.entries(seller.assortment ?? {}).length > 0 ? `
+                    <div class="sale-report-crops">
+                      <strong>${seller.name} stock ledger</strong>
+                      <div class="sale-report-crop-header">
+                        <span>Crop</span>
+                        <span>Stocked</span>
+                        <span>Sold</span>
+                        <span>Unit price</span>
+                        <span>Revenue</span>
+                        <span>Left</span>
+                      </div>
+                      ${Object.entries(seller.assortment).map(([crop, offer]) => {
+                        const sale = seller.cropSales?.[crop];
+                        return `
+                          <div class="sale-report-crop-row">
+                            <span>${CROP_EMOJIS[crop] ?? '🌱'} ${crop}</span>
+                            <span>${offer.initialStock}</span>
+                            <span>${sale?.quantity ?? 0}</span>
+                            <span>${offer.price} coins</span>
+                            <span>+${sale?.revenue ?? 0} coins</span>
+                            <span>${offer.stock}</span>
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
+                  ` : ''}
                 </div>
               `).join('')}
               <div class="sale-report-total">
