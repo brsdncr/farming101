@@ -220,7 +220,7 @@ function getUpgradeCost(cropKey) {
 
 function getCropHarvestYieldBonus(cropKey) {
   const currentLevel = getCropSeedLevel(cropKey);
-  return Math.max(0, currentLevel - 1);
+  return Math.max(0, (currentLevel - 1));
 }
 
 function setShopFeedback(message, kind = 'success') {
@@ -1090,14 +1090,22 @@ function harvestSelectedGroup() {
   }
 
   const harvestedCounts = {};
+
   for (const cell of state.highlightedGroup) {
     const cropType = state.grid[cell.row][cell.col];
+
     if (!cropType) {
       continue;
     }
 
-    harvestedCounts[cropType] = (harvestedCounts[cropType] ?? 0) + 1;
-    state.cropInventory[cropType] = (state.cropInventory[cropType] ?? 0) + 1;
+    const bonus = getCropHarvestYieldBonus(cropType);
+    const yieldAmount = 1 + bonus;
+
+    harvestedCounts[cropType] =
+      (harvestedCounts[cropType] ?? 0) + yieldAmount;
+
+    state.cropInventory[cropType] =
+      (state.cropInventory[cropType] ?? 0) + yieldAmount;
   }
 
   state.coins -= 5;
@@ -1710,7 +1718,7 @@ function renderSaleSimulationScreen() {
               <div class="sale-report-header">
                 <span>Seller</span>
                 <span>Customers</span>
-                <span>Requested</span>
+
                 <span>Sold</span>
                 <span>Revenue</span>
               </div>
@@ -1719,7 +1727,7 @@ function renderSaleSimulationScreen() {
                   <div class="sale-report-row">
                     <span>${seller.name}</span>
                     <span>${seller.customers}</span>
-                    <span>${seller.requested}</span>
+
                     <span>${seller.sold}</span>
                     <span>+$${seller.revenue}</span>
                   </div>
@@ -1754,7 +1762,7 @@ function renderSaleSimulationScreen() {
               <div class="sale-report-total">
                 <span>Total</span>
                 <span>${report.totalCustomers}</span>
-                <span>${report.totalRequested}</span>
+
                 <span>${report.totalSold}</span>
                 <span>+$${report.totalRevenue}</span>
               </div>
