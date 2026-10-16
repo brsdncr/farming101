@@ -60,11 +60,19 @@ export const INITIAL_INVENTORY = {
 
 export const INITIAL_CROP_INVENTORY = Object.fromEntries(CROP_KEYS.map((crop) => [crop, 0]));
 
+// minVariety: how many different crop types a trip to this market must bring.
 export const MARKET_LOCATIONS = {
-  village: { label: 'Village', entryFee: 5, trafficMin: 50, trafficMax: 100, competitors: 1 },
-  town: { label: 'Town', entryFee: 100, trafficMin: 250, trafficMax: 750, competitors: 2 },
-  city: { label: 'City', entryFee: 250, trafficMin: 1000, trafficMax: 5000, competitors: 3 },
+  village: { label: 'Village', entryFee: 5, trafficMin: 50, trafficMax: 100, competitors: 1, minVariety: 2 },
+  town: { label: 'Town', entryFee: 100, trafficMin: 250, trafficMax: 750, competitors: 2, minVariety: 3 },
+  city: { label: 'City', entryFee: 250, trafficMin: 1000, trafficMax: 5000, competitors: 3, minVariety: 4 },
 };
+
+// Connected same-crop groups of this size or larger are harvested automatically after placement.
+export const AUTO_HARVEST_MIN_GROUP_SIZE = 5;
+
+// The emergency harvest clears the whole field; the player holds at most one and restocks it in the shop.
+export const EMERGENCY_HARVEST_MAX_CHARGES = 1;
+export const EMERGENCY_HARVEST_COST = 50;
 
 export const MARKET_RIVAL_STAGES = {
   village: {

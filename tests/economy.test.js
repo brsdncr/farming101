@@ -93,19 +93,64 @@ test('slider quantity updates without forcing a full render', () => {
 
 const emptyInventory = () => ({ tomato: 0, carrot: 0, pumpkin: 0, onion: 0, beetroot: 0, cherry: 0, watermelon: 0, eggplant: 0 });
 
-test('harvest adds the seed level bonus once per harvest action', () => {
+test('groups of five or more are auto-harvested with the level bonus; smaller groups stay', () => {
   Object.assign(app.state, app.createInitialGameState());
   app.state.coins = 20;
   app.state.seedLevels.tomato = 3;
+  for (let col = 0; col < 5; col += 1) {
+    app.state.grid[0][col] = 'tomato';
+  }
+  for (let col = 0; col < 4; col += 1) {
+    app.state.grid[2][col] = 'carrot';
+  }
+
+  app.autoHarvest();
+
+  // tomato: 5 tiles + level 3 bonus (2)
+  assert.equal(app.state.cropInventory.tomato, 7);
+  assert.equal(app.state.cropInventory.carrot, 0);
+  assert.ok(app.state.grid[0].every((cell) => cell === null));
+  assert.equal(app.state.grid[2][0], 'carrot');
+  assert.equal(app.state.coins, 20);
+  assert.match(app.state.harvestFeedback, /Auto-harvested/);
+});
+
+test('emergency harvest clears the whole field once, without level bonus', () => {
+  Object.assign(app.state, app.createInitialGameState());
+  app.state.seedLevels.tomato = 3;
   app.state.grid[0][0] = 'tomato';
-  app.state.grid[0][1] = 'tomato';
-  app.state.highlightedGroup = [{ row: 0, col: 0 }, { row: 0, col: 1 }];
+  app.state.grid[3][3] = 'carrot';
+  app.state.grid[3][4] = 'carrot';
 
-  app.harvestSelectedGroup();
+  app.emergencyHarvest();
 
-  assert.equal(app.state.cropInventory.tomato, 2 + 2);
-  assert.equal(app.state.coins, 15);
-  assert.equal(app.state.grid[0][0], null);
+  assert.equal(app.state.cropInventory.tomato, 1);
+  assert.equal(app.state.cropInventory.carrot, 2);
+  assert.ok(app.state.grid.every((row) => row.every((cell) => cell === null)));
+  assert.equal(app.state.emergencyHarvests, 0);
+
+  app.state.grid[1][1] = 'tomato';
+  app.emergencyHarvest();
+
+  assert.equal(app.state.grid[1][1], 'tomato');
+  assert.equal(app.state.cropInventory.tomato, 1);
+});
+
+test('emergency harvest is restocked in the shop for coins, holding at most one', () => {
+  Object.assign(app.state, app.createInitialGameState());
+  app.state.coins = 100;
+
+  assert.equal(app.restockEmergencyHarvest(), false);
+
+  app.state.emergencyHarvests = 0;
+  assert.equal(app.restockEmergencyHarvest(), true);
+  assert.equal(app.state.emergencyHarvests, 1);
+  assert.equal(app.state.coins, 50);
+
+  app.state.emergencyHarvests = 0;
+  app.state.coins = 49;
+  assert.equal(app.restockEmergencyHarvest(), false);
+  assert.equal(app.state.emergencyHarvests, 0);
 });
 
 test('hand slots never show more seeds than the inventory holds', () => {

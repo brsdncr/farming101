@@ -90,6 +90,28 @@ export function findConnectedGroup(grid, startRow, startCol, targetType = grid[s
   return connected;
 }
 
+export function findAllConnectedGroups(grid) {
+  const seen = new Set();
+  const groups = [];
+
+  for (let row = 0; row < grid.length; row += 1) {
+    for (let col = 0; col < grid[row].length; col += 1) {
+      const cropType = grid[row][col];
+      if (!cropType || seen.has(`${row}:${col}`)) {
+        continue;
+      }
+
+      const cells = findConnectedGroup(grid, row, col);
+      for (const cell of cells) {
+        seen.add(`${cell.row}:${cell.col}`);
+      }
+      groups.push({ cropType, cells });
+    }
+  }
+
+  return groups;
+}
+
 export function clearConnectedCells(grid, cells) {
   const nextGrid = cloneGrid(grid);
 

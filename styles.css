@@ -42,6 +42,8 @@ button {
   border-radius: 18px;
   box-shadow: 0 20px 45px var(--shadow);
   padding: 20px;
+  /* Room to scroll content clear of the fixed Emergency button. */
+  margin-bottom: 110px;
 }
 
 .topbar {
@@ -1031,6 +1033,116 @@ h1, h2 {
   padding: 8px;
   user-select: none;
   cursor: grab;
+}
+
+.harvest-feedback {
+  color: var(--highlight);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+/* Big, glossy one-shot joker pinned to the bottom-right corner. */
+.emergency-button {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  z-index: 15;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 28px;
+  border: 3px solid #ffb3a8;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255,255,255,0.55), rgba(255,255,255,0) 45%),
+    linear-gradient(180deg, #ff5a4f, #c8102e);
+  color: white;
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 0 rgba(0,0,0,0.25);
+  box-shadow:
+    0 6px 0 #7d0a1c,
+    0 14px 28px rgba(200, 16, 46, 0.45),
+    inset 0 -4px 0 rgba(0,0,0,0.18);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+}
+
+.emergency-button:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.03);
+  filter: brightness(1.08);
+}
+
+.emergency-button:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow:
+    0 2px 0 #7d0a1c,
+    0 6px 14px rgba(200, 16, 46, 0.4),
+    inset 0 -2px 0 rgba(0,0,0,0.18);
+}
+
+.emergency-button:disabled {
+  background: linear-gradient(180deg, #6b5a5a, #4a3d3f);
+  border-color: rgba(255,255,255,0.15);
+  box-shadow: 0 4px 0 #2b2224;
+  color: rgba(255,255,255,0.6);
+  cursor: not-allowed;
+}
+
+.emergency-emoji {
+  font-size: 1.6rem;
+}
+
+/* Narrower windows leave less room beside the game, so the button shrinks in two steps. */
+@media (max-width: 1599px) {
+  .emergency-button {
+    right: 16px;
+    bottom: 16px;
+    gap: 6px;
+    padding: 10px 16px;
+    border-width: 2px;
+    font-size: 0.9rem;
+  }
+
+  .emergency-emoji {
+    font-size: 1.15rem;
+  }
+}
+
+/* Icon only: the label stays readable for screen readers, and the tooltip explains the button. */
+@media (max-width: 1439px) {
+  .emergency-button {
+    width: 64px;
+    height: 64px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .emergency-emoji {
+    font-size: 1.8rem;
+  }
+
+  .emergency-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 1023px) {
+  .emergency-button {
+    width: 56px;
+    height: 56px;
+  }
+
+  .emergency-emoji {
+    font-size: 1.5rem;
+  }
 }
 
 .swap-button {

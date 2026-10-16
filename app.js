@@ -4,6 +4,9 @@ import {
   CROP_EMOJIS,
   CROP_KEYS,
   CROP_SEED_CONFIG,
+  AUTO_HARVEST_MIN_GROUP_SIZE,
+  EMERGENCY_HARVEST_COST,
+  EMERGENCY_HARVEST_MAX_CHARGES,
   MARKET_DEMAND_WEIGHTS,
   MARKET_LOCATIONS,
   MARKET_RIVAL_STAGES,
@@ -16,7 +19,7 @@ import {
   clearConnectedCells,
   cloneGrid,
   createGrid,
-  findConnectedGroup,
+  findAllConnectedGroups,
   isInsideGrid,
   placeShapeOnGrid,
 } from './src/state/gridState.js';
@@ -1050,6 +1053,8 @@ function createInitialGameState() {
     dragPreview: null,
     gameOver: false,
     gameOverReason: '',
+    emergencyHarvests: EMERGENCY_HARVEST_MAX_CHARGES,
+    harvestFeedback: '',
   };
 }
 
@@ -1086,6 +1091,7 @@ function clearBoardForReturn() {
   state.dragPreview = null;
   state.activeSlotIndex = null;
   state.hand = createHandState(state.inventory);
+  state.harvestFeedback = '';
   state.market.simulationEvents = [];
   state.market.currentCustomerIndex = -1;
   state.market.saleReport = null;
@@ -1124,31 +1130,70 @@ function swapHandBlocks() {
   render();
 }
 
-function harvestSelectedGroup() {
-  if (state.highlightedGroup.length === 0 || state.coins < 5) {
+// Harvesting is free: crops move from the field into the harvested stock for market,
+// and their cells are cleared. Returns the harvested quantities per crop.
+function harvestGroups(groups, { withLevelBonus }) {
+  const harvested = {};
+
+  for (const group of groups) {
+    // Seed level bonus is a flat extra yield per harvested group, not per tile.
+    const bonus = withLevelBonus ? getCropHarvestYieldBonus(group.cropType) : 0;
+    harvested[group.cropType] = (harvested[group.cropType] ?? 0) + group.cells.length + bonus;
+    state.grid = clearConnectedCells(state.grid, group.cells);
+  }
+
+  for (const [cropType, quantity] of Object.entries(harvested)) {
+    state.cropInventory[cropType] = (state.cropInventory[cropType] ?? 0) + quantity;
+  }
+
+  return harvested;
+}
+
+function describeHarvest(prefix, harvested) {
+  const crops = Object.entries(harvested)
+    .map(([cropType, quantity]) => `${CROP_EMOJIS[cropType] ?? '🌱'} ${quantity}`)
+    .join(' · ');
+  return `${prefix}: ${crops}`;
+}
+
+// Runs after every placement: any group that has grown large enough is harvested.
+function autoHarvest() {
+  const groups = findAllConnectedGroups(state.grid)
+    .filter((group) => group.cells.length >= AUTO_HARVEST_MIN_GROUP_SIZE);
+
+  if (groups.length === 0) {
     return;
   }
 
-  const harvestedCounts = {};
-  for (const cell of state.highlightedGroup) {
-    const cropType = state.grid[cell.row][cell.col];
-    if (!cropType) {
-      continue;
-    }
+  state.harvestFeedback = describeHarvest('Auto-harvested', harvestGroups(groups, { withLevelBonus: true }));
+}
 
-    harvestedCounts[cropType] = (harvestedCounts[cropType] ?? 0) + 1;
-    state.cropInventory[cropType] = (state.cropInventory[cropType] ?? 0) + 1;
+function isFieldEmpty() {
+  return state.grid.every((row) => row.every((cell) => !cell));
+}
+
+// One-shot joker for a field clogged with small groups: harvests everything, without level bonus.
+function emergencyHarvest() {
+  if (state.emergencyHarvests <= 0 || isFieldEmpty()) {
+    return;
   }
 
-  // Seed level bonus is a flat extra yield per harvest action, not per tile.
-  for (const cropType of Object.keys(harvestedCounts)) {
-    state.cropInventory[cropType] += getCropHarvestYieldBonus(cropType);
-  }
-
-  state.coins -= 5;
-  state.grid = clearConnectedCells(state.grid, state.highlightedGroup);
-  state.highlightedGroup = [];
+  const groups = findAllConnectedGroups(state.grid);
+  state.emergencyHarvests -= 1;
+  state.harvestFeedback = describeHarvest('Emergency harvest', harvestGroups(groups, { withLevelBonus: false }));
   render();
+}
+
+function restockEmergencyHarvest() {
+  if (state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES || state.coins < EMERGENCY_HARVEST_COST) {
+    return false;
+  }
+
+  state.coins -= EMERGENCY_HARVEST_COST;
+  state.emergencyHarvests += 1;
+  state.shopFeedback = { message: 'Emergency harvest restocked', kind: 'success' };
+  render();
+  return true;
 }
 
 function rotateSelectedTetromino(slotIndex = state.activeSlotIndex ?? dragState.slotIndex) {
@@ -1311,6 +1356,8 @@ function finishDrag(event) {
       const inventoryUpdated = consumeTetrominoFromInventory(state.inventory, tetromino);
       if (inventoryUpdated) {
         state.grid = placedGrid;
+        state.harvestFeedback = '';
+        autoHarvest();
         advanceHand();
       }
     }
@@ -1443,6 +1490,30 @@ function renderHandSlots() {
   `;
 }
 
+function renderEmergencyButton() {
+  if (state.marketOpen || state.shopOpen) {
+    return '';
+  }
+
+  const hasCharge = state.emergencyHarvests > 0;
+  const title = hasCharge
+    ? 'Harvest the entire field. Can be used once; restock it in the shop.'
+    : 'Used. Restock it in the shop after selling.';
+
+  return `
+    <button
+      id="emergency-harvest-button"
+      type="button"
+      class="emergency-button"
+      title="${title}"
+      ${!hasCharge || isFieldEmpty() ? 'disabled' : ''}
+    >
+      <span class="emergency-emoji" aria-hidden="true">🚨</span>
+      <span class="emergency-label">${hasCharge ? 'Emergency' : 'Used'}</span>
+    </button>
+  `;
+}
+
 function renderDragGhost() {
   if (!dragState.active || dragState.overBoard || !dragState.pointer) {
     return '';
@@ -1503,6 +1574,27 @@ function renderShopPanel() {
         ` : ''}
 
         <div class="shop-list" data-shop-list>
+          <div class="shop-row">
+            <div class="shop-row-header">
+              <div class="sale-row-label">
+                <span aria-hidden="true">🚨</span>
+                <span>Emergency harvest</span>
+              </div>
+              <span class="shop-level-tag">${state.emergencyHarvests}/${EMERGENCY_HARVEST_MAX_CHARGES}</span>
+            </div>
+
+            <div class="shop-actions">
+              <button
+                type="button"
+                class="shop-button"
+                data-shop-action="restock-emergency"
+                ${state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES || state.coins < EMERGENCY_HARVEST_COST ? 'disabled' : ''}
+              >
+                ${state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES ? 'Ready' : `Restock (${EMERGENCY_HARVEST_COST})`}
+              </button>
+            </div>
+          </div>
+
           ${CROP_KEYS.map((cropKey) => {
             const config = getCropSeedConfig(cropKey);
             const currentLevel = getCropSeedLevel(cropKey);
@@ -1870,7 +1962,7 @@ function render() {
         <section class="panel board-panel ${state.marketOpen ? 'market-open' : ''}">
           <div class="section-title-row">
             <h2>Farm Board</h2>
-            <button id="harvest-button" type="button" class="harvest-button" ${state.coins < 5 ? 'disabled' : ''}>Harvest (-5)</button>
+            ${state.harvestFeedback ? `<span class="harvest-feedback">${state.harvestFeedback}</span>` : ''}
           </div>
           ${renderBoard()}
 
@@ -1907,6 +1999,7 @@ function render() {
 
     ${renderMarketPanel()}
     ${renderShopPanel()}
+    ${renderEmergencyButton()}
     ${renderDragGhost()}
   `;
 
@@ -1933,55 +2026,15 @@ function bindInteractions() {
       return;
     }
 
-    if (state.gameOver) {
-      return;
-    }
-
-    if (state.marketOpen) {
-      return;
-    }
-
-    const cell = event.target.closest('.board-cell');
-    if (!cell) {
-      return;
-    }
-
-    const row = Number(cell.dataset.row);
-    const col = Number(cell.dataset.col);
-    const crop = state.grid[row][col];
-
-    if (!crop) {
-      state.highlightedGroup = [];
-      render();
-      return;
-    }
-
-    state.highlightedGroup = findConnectedGroup(state.grid, row, col);
-    render();
-  });
-
-  app.addEventListener('dblclick', (event) => {
-    if (state.marketOpen) {
-      return;
-    }
-
-    const cell = event.target.closest('.board-cell');
-    if (!cell) {
-      return;
-    }
-
-    if (state.highlightedGroup.length > 0) {
-      harvestSelectedGroup();
-    }
   });
 
   app.addEventListener('click', (event) => {
-    const button = event.target.closest('#harvest-button');
-    if (button) {
-      if (state.marketOpen) {
-        return;
+    const emergencyButton = event.target.closest('#emergency-harvest-button');
+    if (emergencyButton) {
+      if (!state.marketOpen && !state.shopOpen) {
+        emergencyHarvest();
       }
-      harvestSelectedGroup();
+      return;
     }
 
     const handNextButton = event.target.closest('#hand-next-button');
@@ -2041,6 +2094,10 @@ function bindInteractions() {
 
       if (action === 'upgrade-crop') {
         upgradeCrop(cropKey);
+      }
+
+      if (action === 'restock-emergency') {
+        restockEmergencyHarvest();
       }
       return;
     }
@@ -2227,9 +2284,11 @@ export {
   createInitialGameState,
   createMarketState,
   finalizeMarketSimulation,
+  autoHarvest,
+  emergencyHarvest,
   getMarketLocationProfile,
-  harvestSelectedGroup,
   render,
+  restockEmergencyHarvest,
   setMarketQuantity,
   startSelling,
   state,
