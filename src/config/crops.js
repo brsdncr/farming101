@@ -36,16 +36,20 @@ export const CROP_COLORS = {
   eggplant: '#8f67d8',
 };
 
-export const CROP_BASE_PRICES = {
-  tomato: 8,
-  carrot: 6,
-  pumpkin: 10,
-  onion: 9,
-  beetroot: 11,
-  cherry: 14,
-  watermelon: 16,
-  eggplant: 13,
+// Per-crop economy: tomato and carrot are cheap starters; later crops cost much more to unlock
+// and to seed, but sell for far more.
+const CROP_ECONOMY = {
+  tomato: { price: 8, unlockCost: 0, seedPackCost: 10 },
+  carrot: { price: 6, unlockCost: 0, seedPackCost: 10 },
+  pumpkin: { price: 14, unlockCost: 250, seedPackCost: 30 },
+  beetroot: { price: 16, unlockCost: 400, seedPackCost: 40 },
+  onion: { price: 35, unlockCost: 1500, seedPackCost: 100 },
+  cherry: { price: 60, unlockCost: 3000, seedPackCost: 150 },
+  eggplant: { price: 120, unlockCost: 10000, seedPackCost: 300 },
+  watermelon: { price: 200, unlockCost: 20000, seedPackCost: 500 },
 };
+
+export const CROP_BASE_PRICES = Object.fromEntries(CROP_KEYS.map((cropKey) => [cropKey, CROP_ECONOMY[cropKey].price]));
 
 export const INITIAL_INVENTORY = {
   tomato: 20,
@@ -98,19 +102,20 @@ export const MARKET_DEMAND_WEIGHTS = {
   },
 };
 
-export const SEED_UPGRADE_COST_BY_LEVEL = Object.fromEntries(
-  Array.from({ length: 9 }, (_, index) => [index + 2, (index + 1) * 10]),
-);
+// Upgrading a crop to level L costs its seed pack price × SEED_UPGRADE_COST_FACTOR × SEED_UPGRADE_COST_GROWTH^(L - 2),
+// so each level costs more than the last and valuable crops are expensive to level.
+export const SEED_UPGRADE_COST_FACTOR = 2;
+export const SEED_UPGRADE_COST_GROWTH = 2;
 
 export const CROP_SEED_CONFIG = Object.fromEntries(
   CROP_KEYS.map((cropKey) => {
-    const unlocked = cropKey === 'tomato' || cropKey === 'carrot';
+    const unlocked = CROP_ECONOMY[cropKey].unlockCost === 0;
 
     return [cropKey, {
       label: cropKey[0].toUpperCase() + cropKey.slice(1),
-      seedPackCost: 10,
+      seedPackCost: CROP_ECONOMY[cropKey].seedPackCost,
       seedPackQty: 10,
-      unlockCost: unlocked ? 0 : 100,
+      unlockCost: CROP_ECONOMY[cropKey].unlockCost,
       unlocked,
       level: unlocked ? 1 : 0,
       maxLevel: 10,

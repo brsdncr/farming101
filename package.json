@@ -9,7 +9,8 @@
     "start:desktop": "electron .",
     "dist:mac": "electron-builder --mac dmg",
     "dist:win": "electron-builder --win nsis",
-    "test": "node --test"
+    "test": "node --test",
+    "balance": "node scripts/balance.mjs"
   },
   "devDependencies": {
     "electron": "^44.7.0",

@@ -12,7 +12,8 @@ import {
   MARKET_LOCATIONS,
   MARKET_PRICE_SENSITIVITY,
   MIN_UNITS_FOR_VARIETY,
-  SEED_UPGRADE_COST_BY_LEVEL,
+  SEED_UPGRADE_COST_FACTOR,
+  SEED_UPGRADE_COST_GROWTH,
 } from './src/config/crops.js';
 import {
   DEATH_AGE,
@@ -233,7 +234,8 @@ function getUpgradeCost(cropKey) {
     return null;
   }
 
-  return Number(SEED_UPGRADE_COST_BY_LEVEL[currentLevel + 1] ?? (currentLevel + 1) * 10);
+  const nextLevel = currentLevel + 1;
+  return Math.round(getCropSeedPrice(cropKey) * SEED_UPGRADE_COST_FACTOR * SEED_UPGRADE_COST_GROWTH ** (nextLevel - 2));
 }
 
 function getCropHarvestYieldBonus(cropKey) {
@@ -964,13 +966,18 @@ function swapHandBlocks() {
 
 // Harvesting is free: crops move from the field into the harvested stock for market,
 // and their cells are cleared. Returns the harvested quantities per crop.
+// Units harvested from one connected group of `tileCount` tiles.
+// Seed level bonus is a flat extra yield per harvested group, not per tile.
+function getHarvestYield(cropKey, tileCount, { withLevelBonus = true } = {}) {
+  return tileCount + (withLevelBonus ? getCropHarvestYieldBonus(cropKey) : 0);
+}
+
 function harvestGroups(groups, { withLevelBonus }) {
   const harvested = {};
 
   for (const group of groups) {
-    // Seed level bonus is a flat extra yield per harvested group, not per tile.
-    const bonus = withLevelBonus ? getCropHarvestYieldBonus(group.cropType) : 0;
-    harvested[group.cropType] = (harvested[group.cropType] ?? 0) + group.cells.length + bonus;
+    const quantity = getHarvestYield(group.cropType, group.cells.length, { withLevelBonus });
+    harvested[group.cropType] = (harvested[group.cropType] ?? 0) + quantity;
     state.grid = clearConnectedCells(state.grid, group.cells);
   }
 
@@ -2089,6 +2096,7 @@ export {
   advanceTime,
   autoHarvest,
   buildMarketCustomerSimulation,
+  buySeedPack,
   checkForGameOver,
   createHandState,
   createInitialGameState,
@@ -2097,15 +2105,20 @@ export {
   finalizeMarketSimulation,
   getBuyChance,
   getCalendar,
+  getHarvestYield,
   getMarketLocationProfile,
+  getUpgradeCost,
   getVarietyCount,
   render,
   restockEmergencyHarvest,
   skipSeason,
+  startNextSeason,
   startSelling,
   state,
   swapHandBlocks,
+  unlockCrop,
   unlockMarket,
+  upgradeCrop,
 };
 
 if (typeof document !== 'undefined' && document.getElementById('app')) {
