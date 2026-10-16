@@ -14,6 +14,14 @@ import {
   MIN_UNITS_FOR_VARIETY,
   SEED_UPGRADE_COST_BY_LEVEL,
 } from './src/config/crops.js';
+import {
+  DEATH_AGE,
+  GOAL_COINS,
+  SEASONS,
+  START_AGE,
+  VISITS_PER_SEASON,
+  VISITS_PER_YEAR,
+} from './src/config/game.js';
 import { SHAPE_DEFINITIONS, SHAPE_TYPES } from './src/config/shapes.js';
 import {
   GRID_SIZE,
@@ -660,6 +668,7 @@ function finalizeMarketSimulation(profile, simulation) {
 
   state.cropInventory = createCropInventoryState();
   state.coins += totalRevenue;
+  advanceTime();
   state.market.simulating = false;
   state.market.saleComplete = true;
   state.market.saleReport = {
@@ -691,6 +700,38 @@ function getSellingBlocker() {
   }
 
   return null;
+}
+
+function canSellAnywhere() {
+  return Object.entries(MARKET_LOCATIONS).some(([locationKey, profile]) => (
+    isMarketUnlocked(locationKey) && getVarietyCount(locationKey) >= profile.minVariety
+  ));
+}
+
+// Leaves the market for a fresh field: whatever is still planted is discarded, then the shop opens.
+function startNextSeason() {
+  clearBoardForReturn();
+  state.marketOpen = false;
+  state.market.saleScreenOpen = false;
+  state.market.saleComplete = false;
+  state.market.simulating = false;
+  state.market.activeSimulation = null;
+  state.market.activeSelectedCrops = [];
+  state.market.skipAnimationEnabledAt = 0;
+  state.shopOpen = true;
+}
+
+// Way out when no unlocked market accepts the harvest: time passes and the harvest is lost.
+function skipSeason() {
+  if (state.market.simulating || canSellAnywhere()) {
+    return;
+  }
+
+  state.cropInventory = createCropInventoryState();
+  advanceTime();
+  startNextSeason();
+  state.market.lastSummary = 'Season skipped. The harvest and the field were discarded.';
+  render();
 }
 
 function startSelling() {
@@ -770,7 +811,8 @@ function createInitialGameState() {
 
   return {
     round: 1,
-    season: 'summer',
+    age: START_AGE,
+    season: SEASONS[0],
     coins: 20,
     grid: createGrid(6, 6),
     inventory,
@@ -788,29 +830,84 @@ function createInitialGameState() {
     dragPreview: null,
     gameOver: false,
     gameOverReason: '',
+    gameResult: null,
     emergencyHarvests: EMERGENCY_HARVEST_MAX_CHARGES,
     harvestFeedback: '',
   };
 }
 
+// Calendar after a number of finished market visits: 2 visits per season, 4 per year.
+function getCalendar(visitsCompleted) {
+  return {
+    age: START_AGE + Math.floor(visitsCompleted / VISITS_PER_YEAR),
+    season: SEASONS[Math.floor(visitsCompleted / VISITS_PER_SEASON) % SEASONS.length],
+  };
+}
+
+function advanceTime() {
+  state.round += 1;
+  Object.assign(state, getCalendar(state.round - 1));
+}
+
+function getCheapestSeedPackCost() {
+  return Math.min(...CROP_KEYS.filter((crop) => getCropSeedLevel(crop) > 0).map(getCropSeedPrice));
+}
+
+// Nothing left to plant, harvest or sell, and not enough coins to buy seeds.
+function isBankrupt() {
+  return getInventoryTotal(state.inventory) === 0
+    && getInventoryTotal(state.cropInventory) === 0
+    && isFieldEmpty()
+    && state.coins < getCheapestSeedPackCost();
+}
+
+function getGameEndResult() {
+  if (state.coins >= GOAL_COINS) {
+    return {
+      kind: 'won',
+      reason: `You became a millionaire at age ${state.age}!`,
+    };
+  }
+
+  if (state.age >= DEATH_AGE) {
+    return {
+      kind: 'died',
+      reason: `You reached ${DEATH_AGE} with ${state.coins.toLocaleString('en-US')} coins. The million slipped away.`,
+    };
+  }
+
+  if (isBankrupt()) {
+    return {
+      kind: 'bankrupt',
+      reason: 'You have no seeds, nothing to harvest, and not enough coins for a seed pack.',
+    };
+  }
+
+  return null;
+}
+
+// Evaluated from render. Waits while the sale screen is open so the summary is always shown first.
 function checkForGameOver() {
   if (state.gameOver) {
     return true;
   }
 
-  const canHarvest = state.coins >= 5;
-
-  if (!canHarvest) {
-    state.gameOver = true;
-    state.gameOverReason = 'You ran out of coins and can no longer afford to harvest.';
-    state.marketOpen = false;
-    state.shopOpen = false;
-    state.market.saleScreenOpen = false;
-    state.market.simulating = false;
-    return true;
+  if (state.market.saleScreenOpen) {
+    return false;
   }
 
-  return false;
+  const result = getGameEndResult();
+  if (!result) {
+    return false;
+  }
+
+  state.gameOver = true;
+  state.gameResult = result.kind;
+  state.gameOverReason = result.reason;
+  state.marketOpen = false;
+  state.shopOpen = false;
+  state.market.simulating = false;
+  return true;
 }
 
 function resetGameState() {
@@ -1502,6 +1599,11 @@ function renderMarketPanel() {
           </div>
 
           <button type="button" id="market-start-selling" class="sell-button" ${sellDisabled ? 'disabled' : ''}>Start Selling</button>
+          ${!state.market.simulating && !canSellAnywhere() ? `
+            <button type="button" id="market-skip-season" class="shop-button secondary" title="No unlocked market accepts this harvest">
+              Skip season (discard harvest and field)
+            </button>
+          ` : ''}
           <p class="market-summary">${sellingBlocker && !state.market.simulating ? sellingBlocker : state.market.lastSummary}</p>
         </div>
       </div>
@@ -1509,7 +1611,15 @@ function renderMarketPanel() {
   `;
 }
 
+const GAME_ENDINGS = {
+  won: { badge: '🏆', title: 'Millionaire!', button: 'Play again' },
+  died: { badge: '🪦', title: 'Game Over', button: 'Retry' },
+  bankrupt: { badge: '💸', title: 'Bankrupt', button: 'Retry' },
+};
+
 function renderGameOverScreen() {
+  const ending = GAME_ENDINGS[state.gameResult] ?? GAME_ENDINGS.bankrupt;
+
   return `
     <div class="sale-screen game-over-screen">
       <div class="sale-screen-panel game-over-panel">
@@ -1521,10 +1631,10 @@ function renderGameOverScreen() {
         </div>
 
         <div class="game-over-body">
-          <div class="game-over-badge">💸</div>
-          <h3 class="game-over-title">Game Over</h3>
-          <p class="game-over-message">${state.gameOverReason || 'You can no longer afford to harvest or enter the market.'}</p>
-          <button id="game-over-retry" type="button" class="sell-button game-over-button">Retry</button>
+          <div class="game-over-badge">${ending.badge}</div>
+          <h3 class="game-over-title">${ending.title}</h3>
+          <p class="game-over-message">${state.gameOverReason}</p>
+          <button id="game-over-retry" type="button" class="sell-button game-over-button">${ending.button}</button>
         </div>
       </div>
     </div>
@@ -1683,7 +1793,8 @@ function render() {
         <div class="hud">
           <div class="stat"><span>Round</span><strong>${state.round}</strong></div>
           <div class="stat"><span>Season</span><strong>${state.season}</strong></div>
-          <div class="stat"><span>Coins</span><strong>${state.coins}</strong></div>
+          <div class="stat"><span>Age</span><strong>${state.age}</strong></div>
+          <div class="stat" title="Reach ${GOAL_COINS.toLocaleString('en-US')} coins before age ${DEATH_AGE}"><span>Coins / Goal</span><strong>${state.coins.toLocaleString('en-US')} / 1M</strong></div>
         </div>
       </header>
 
@@ -1854,15 +1965,14 @@ function bindInteractions() {
 
     const saleScreenContinue = event.target.closest('#sale-screen-continue');
     if (saleScreenContinue) {
-      clearBoardForReturn();
-      state.market.saleScreenOpen = false;
-      state.market.saleComplete = false;
-      state.market.simulating = false;
-      state.market.activeSimulation = null;
-      state.market.activeSelectedCrops = [];
-      state.market.skipAnimationEnabledAt = 0;
-      state.shopOpen = true;
+      startNextSeason();
       render();
+      return;
+    }
+
+    const skipSeasonButton = event.target.closest('#market-skip-season');
+    if (skipSeasonButton) {
+      skipSeason();
       return;
     }
   });
@@ -1975,24 +2085,27 @@ function bindInteractions() {
 }
 
 export {
+  advanceHand,
+  advanceTime,
+  autoHarvest,
   buildMarketCustomerSimulation,
   checkForGameOver,
-  advanceHand,
   createHandState,
   createInitialGameState,
   createMarketState,
-  finalizeMarketSimulation,
-  autoHarvest,
   emergencyHarvest,
-  getMarketLocationProfile,
+  finalizeMarketSimulation,
   getBuyChance,
+  getCalendar,
+  getMarketLocationProfile,
   getVarietyCount,
   render,
   restockEmergencyHarvest,
+  skipSeason,
   startSelling,
-  unlockMarket,
   state,
   swapHandBlocks,
+  unlockMarket,
 };
 
 if (typeof document !== 'undefined' && document.getElementById('app')) {

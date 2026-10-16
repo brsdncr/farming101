@@ -56,27 +56,6 @@ test('market settlement pays revenue once, keeps seeds unchanged, and clears all
   assert.match(app.state.market.lastSummary, /onion: 4 spoiled/);
 });
 
-test('game over triggers only when coins cannot cover harvest', () => {
-  app.state.coins = 4;
-  app.state.gameOver = false;
-
-  const result = app.checkForGameOver();
-
-  assert.equal(result, true);
-  assert.equal(app.state.gameOver, true);
-});
-
-test('city entry fee alone does not trigger game over', () => {
-  app.state.coins = 10;
-  app.state.gameOver = false;
-  app.state.market.location = 'city';
-
-  const result = app.checkForGameOver();
-
-  assert.equal(result, false);
-  assert.equal(app.state.gameOver, false);
-});
-
 const emptyInventory = () => ({ tomato: 0, carrot: 0, pumpkin: 0, onion: 0, beetroot: 0, cherry: 0, watermelon: 0, eggplant: 0 });
 
 test('groups of five or more are auto-harvested with the level bonus; smaller groups stay', () => {
