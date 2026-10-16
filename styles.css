@@ -1019,7 +1019,8 @@ h1, h2 {
 
 .hand-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(80px, 1fr));
+  grid-template-columns: minmax(80px, 1fr) auto minmax(80px, 1fr);
+  align-items: center;
   gap: 10px;
 }
 
@@ -1030,6 +1031,28 @@ h1, h2 {
   padding: 8px;
   user-select: none;
   cursor: grab;
+}
+
+.swap-button {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: var(--text);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.swap-button:hover {
+  background: rgba(255,255,255,0.14);
+}
+
+.tetromino-card.next-card {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .tetromino-card.selected {
@@ -1046,13 +1069,18 @@ h1, h2 {
 
 .mini-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+  aspect-ratio: 1;
   gap: 3px;
+  /* Keeps hand blocks close to board tile size now that the hand has only 2 wide cards. */
+  max-width: 200px;
+  margin: 0 auto;
 }
 
 .slot-cell {
   width: 100%;
-  aspect-ratio: 1;
+  height: 100%;
   border-radius: 4px;
   background: #2a3139;
   border: 1px solid rgba(255,255,255,0.05);

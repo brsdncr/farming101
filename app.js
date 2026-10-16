@@ -28,6 +28,11 @@ import {
   weightedRandomCrop,
 } from './src/state/inventoryState.js';
 
+// The hand holds the block being played plus a preview of the next one.
+const CURRENT_SLOT = 0;
+const NEXT_SLOT = 1;
+const HAND_SIZE = 2;
+
 const state = createInitialGameState();
 const dragState = {
   active: false,
@@ -283,8 +288,9 @@ function consumeTetrominoFromInventory(inventory, tetromino) {
   const usage = {};
   for (const cell of tetromino.cells) {
     const cropType = cell.cropType;
+    // Unfilled blocks (drawn when stock ran low) cost nothing.
     if (!cropType) {
-      return false;
+      continue;
     }
     usage[cropType] = (usage[cropType] ?? 0) + 1;
   }
@@ -353,25 +359,41 @@ function createTetrominoFromShape(shapeType, inventory) {
     };
   }
 
-  const maxCells = Math.min(baseCells.length, totalAvailable);
-  const filledCells = [];
-
-  for (let index = 0; index < maxCells; index += 1) {
+  // The full shape is always kept; blocks left unfilled when stock runs out stay null.
+  for (const cell of baseCells) {
     const cropType = weightedRandomCrop(availableInventory);
     if (!cropType) {
       break;
     }
 
-    const nextCell = { ...baseCells[index], cropType };
-    filledCells.push(nextCell);
+    cell.cropType = cropType;
     consumeStock(availableInventory, cropType, 1);
   }
 
   return {
     id: `${shapeType}-${Math.random().toString(36).slice(2, 10)}`,
     shapeType,
-    cells: normalizeCells(filledCells),
+    cells: normalizeCells(baseCells),
   };
+}
+
+// Seeds still free once the crops shown in the other hand slots are set aside.
+function getUnreservedInventory(inventory, slots, excludedSlotIndex = null) {
+  const available = { ...inventory };
+
+  slots.forEach((tetromino, index) => {
+    if (index === excludedSlotIndex || !Array.isArray(tetromino?.cells)) {
+      return;
+    }
+
+    for (const cell of tetromino.cells) {
+      if (cell.cropType) {
+        available[cell.cropType] = Math.max(0, (available[cell.cropType] ?? 0) - 1);
+      }
+    }
+  });
+
+  return available;
 }
 
 function ensureBagHasShapes(bag) {
@@ -393,8 +415,8 @@ function createHandState(inventory) {
   const bag = createShapeBag();
   const slots = [];
 
-  for (let index = 0; index < 3; index += 1) {
-    const next = drawNextTetrominoFromBag(bag, inventory);
+  for (let index = 0; index < HAND_SIZE; index += 1) {
+    const next = drawNextTetrominoFromBag(bag, getUnreservedInventory(inventory, slots));
     slots.push(next.tetromino);
     bag.length = 0;
     for (const entry of next.bag) {
@@ -967,6 +989,11 @@ function startSelling() {
   }, 3000);
 
   const advanceCustomerSimulation = () => {
+    // Stop the loop once this sale has been finalized (e.g. via Skip Animation).
+    if (!state.market.simulating || state.market.activeSimulation !== simulation) {
+      return;
+    }
+
     if (state.market.skipAnimation) {
       finalizeMarketSimulation(profile, simulation, selectedCrops);
       return;
@@ -1078,10 +1105,23 @@ function nextTetrominoInBag(inventory) {
   return { tetromino, bag: nextBag };
 }
 
-function refillSlot(slotIndex) {
-  const { tetromino, bag } = nextTetrominoInBag(state.inventory);
-  state.hand.slots[slotIndex] = tetromino;
+// After the current block is placed, the next block moves up and a new next block is drawn.
+function advanceHand() {
+  state.hand.slots[CURRENT_SLOT] = state.hand.slots[NEXT_SLOT];
+  const available = getUnreservedInventory(state.inventory, state.hand.slots, NEXT_SLOT);
+  const { tetromino, bag } = nextTetrominoInBag(available);
+  state.hand.slots[NEXT_SLOT] = tetromino;
   state.hand.bag = bag;
+}
+
+function swapHandBlocks() {
+  if (dragState.active) {
+    return;
+  }
+
+  const { slots } = state.hand;
+  [slots[CURRENT_SLOT], slots[NEXT_SLOT]] = [slots[NEXT_SLOT], slots[CURRENT_SLOT]];
+  render();
 }
 
 function harvestSelectedGroup() {
@@ -1100,6 +1140,11 @@ function harvestSelectedGroup() {
     state.cropInventory[cropType] = (state.cropInventory[cropType] ?? 0) + 1;
   }
 
+  // Seed level bonus is a flat extra yield per harvest action, not per tile.
+  for (const cropType of Object.keys(harvestedCounts)) {
+    state.cropInventory[cropType] += getCropHarvestYieldBonus(cropType);
+  }
+
   state.coins -= 5;
   state.grid = clearConnectedCells(state.grid, state.highlightedGroup);
   state.highlightedGroup = [];
@@ -1107,7 +1152,7 @@ function harvestSelectedGroup() {
 }
 
 function rotateSelectedTetromino(slotIndex = state.activeSlotIndex ?? dragState.slotIndex) {
-  if (slotIndex === null || slotIndex === undefined) {
+  if (slotIndex !== CURRENT_SLOT) {
     return;
   }
 
@@ -1148,6 +1193,10 @@ function getBoardCellFromPointer(event) {
 }
 
 function startDrag(slotIndex, event) {
+  if (slotIndex !== CURRENT_SLOT) {
+    return;
+  }
+
   const tetromino = state.hand.slots[slotIndex];
   if (!tetromino || !tetromino.cells || tetromino.cells.length === 0) {
     return;
@@ -1262,7 +1311,7 @@ function finishDrag(event) {
       const inventoryUpdated = consumeTetrominoFromInventory(state.inventory, tetromino);
       if (inventoryUpdated) {
         state.grid = placedGrid;
-        refillSlot(dragState.slotIndex);
+        advanceHand();
       }
     }
   }
@@ -1346,7 +1395,7 @@ function renderBoardDragPreview() {
       class="board-preview-cell ${preview.valid ? 'valid' : 'invalid'}"
       style="grid-row:${cell.row - minRow + 1}; grid-column:${cell.col - minCol + 1}; width:${metrics.cellWidth}px; height:${metrics.cellHeight}px;"
     >
-      ${renderCropPixelArt(cell.cropType, 0.8)}
+      ${cell.cropType ? renderCropPixelArt(cell.cropType, 0.8) : ''}
     </div>
   `).join('');
 
@@ -1362,32 +1411,36 @@ function renderBoardDragPreview() {
 }
 
 function renderHandSlots() {
-  return state.hand.slots
+  const cards = state.hand.slots
     .map((tetromino, index) => {
       const safeTetromino = tetromino && tetromino.cells ? tetromino : { shapeType: 'O', cells: [] };
-      const cells = [];
-
-      for (let row = 0; row < 4; row += 1) {
-        for (let col = 0; col < 4; col += 1) {
-          const cell = safeTetromino.cells.find((entry) => entry.row === row && entry.col === col);
-          const hasCrop = !!cell;
-          const fillColor = hasCrop ? CROP_COLORS[cell.cropType] : '#2b3038';
-          cells.push(`
-            <div class="slot-cell ${hasCrop ? 'filled' : ''}" style="background:#3c2d22; border-color:${hasCrop ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.02)'}">
-              ${hasCrop ? renderCropPixelArt(cell.cropType, 1) : ''}
-            </div>
-          `);
-        }
-      }
+      const shapeWidth = Math.max(0, ...safeTetromino.cells.map((cell) => cell.col + 1));
+      const shapeHeight = Math.max(0, ...safeTetromino.cells.map((cell) => cell.row + 1));
+      // The mini grid has 8x8 half-size tracks and each block spans 2, so any shape can be centered exactly.
+      const colOffset = 4 - shapeWidth;
+      const rowOffset = 4 - shapeHeight;
+      const cells = safeTetromino.cells.map((cell) => `
+        <div
+          class="slot-cell filled"
+          style="grid-row:${rowOffset + cell.row * 2 + 1} / span 2; grid-column:${colOffset + cell.col * 2 + 1} / span 2; background:#3c2d22; border-color:rgba(255,255,255,0.08);"
+        >
+          ${cell.cropType ? renderCropPixelArt(cell.cropType, 1) : ''}
+        </div>
+      `);
 
       return `
-        <div class="tetromino-card ${state.activeSlotIndex === index ? 'selected' : ''}" data-slot-index="${index}">
-          <div class="shape-name">${safeTetromino.shapeType}</div>
+        <div class="tetromino-card ${index === NEXT_SLOT ? 'next-card' : ''} ${state.activeSlotIndex === index ? 'selected' : ''}" data-slot-index="${index}">
+          <div class="shape-name">${index === CURRENT_SLOT ? 'Current' : 'Next'}</div>
           <div class="mini-grid">${cells.join('')}</div>
         </div>
       `;
-    })
-    .join('');
+    });
+
+  return `
+    ${cards[CURRENT_SLOT]}
+    <button id="hand-next-button" type="button" class="swap-button" title="Swap the current block with the next one" aria-label="Swap">🔁</button>
+    ${cards[NEXT_SLOT]}
+  `;
 }
 
 function renderDragGhost() {
@@ -1415,7 +1468,7 @@ function renderDragGhost() {
       class="drag-ghost-cell"
       style="grid-row:${cell.row - minRow + 1}; grid-column:${cell.col - minCol + 1}; width:${tileSize}px; height:${tileSize}px;"
     >
-      ${renderCropPixelArt(cell.cropType)}
+      ${cell.cropType ? renderCropPixelArt(cell.cropType) : ''}
     </div>
   `).join('');
 
@@ -1931,6 +1984,14 @@ function bindInteractions() {
       harvestSelectedGroup();
     }
 
+    const handNextButton = event.target.closest('#hand-next-button');
+    if (handNextButton) {
+      if (!state.marketOpen) {
+        swapHandBlocks();
+      }
+      return;
+    }
+
     const marketToggle = event.target.closest('#market-toggle');
     if (marketToggle) {
       state.marketOpen = !state.marketOpen;
@@ -2161,12 +2222,18 @@ function bindInteractions() {
 export {
   buildMarketCustomerSimulation,
   checkForGameOver,
+  advanceHand,
+  createHandState,
   createInitialGameState,
   createMarketState,
   finalizeMarketSimulation,
+  getMarketLocationProfile,
+  harvestSelectedGroup,
   render,
   setMarketQuantity,
+  startSelling,
   state,
+  swapHandBlocks,
 };
 
 if (typeof document !== 'undefined' && document.getElementById('app')) {

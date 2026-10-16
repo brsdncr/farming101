@@ -90,3 +90,106 @@ test('slider quantity updates without forcing a full render', () => {
   assert.equal(app.state.market.selectedQuantities.tomato, 7);
   assert.equal(appElement.renderCount, 0);
 });
+
+const emptyInventory = () => ({ tomato: 0, carrot: 0, pumpkin: 0, onion: 0, beetroot: 0, cherry: 0, watermelon: 0, eggplant: 0 });
+
+test('harvest adds the seed level bonus once per harvest action', () => {
+  Object.assign(app.state, app.createInitialGameState());
+  app.state.coins = 20;
+  app.state.seedLevels.tomato = 3;
+  app.state.grid[0][0] = 'tomato';
+  app.state.grid[0][1] = 'tomato';
+  app.state.highlightedGroup = [{ row: 0, col: 0 }, { row: 0, col: 1 }];
+
+  app.harvestSelectedGroup();
+
+  assert.equal(app.state.cropInventory.tomato, 2 + 2);
+  assert.equal(app.state.coins, 15);
+  assert.equal(app.state.grid[0][0], null);
+});
+
+test('hand slots never show more seeds than the inventory holds', () => {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const inventory = { ...emptyInventory(), tomato: 3, carrot: 2 };
+    const hand = app.createHandState(inventory);
+    const shown = {};
+
+    for (const slot of hand.slots) {
+      for (const cell of slot.cells) {
+        if (cell.cropType) {
+          shown[cell.cropType] = (shown[cell.cropType] ?? 0) + 1;
+        }
+      }
+    }
+
+    assert.ok((shown.tomato ?? 0) <= 3);
+    assert.ok((shown.carrot ?? 0) <= 2);
+  }
+});
+
+test('low stock still draws a full four-block shape with unfilled blocks', () => {
+  const hand = app.createHandState({ ...emptyInventory(), tomato: 2 });
+  const [first] = hand.slots;
+
+  assert.equal(first.cells.length, 4);
+  assert.equal(first.cells.filter((cell) => cell.cropType === 'tomato').length, 2);
+  assert.equal(first.cells.filter((cell) => cell.cropType === null).length, 2);
+});
+
+test('skipping the sale animation stops the customer loop', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  Object.assign(app.state, app.createInitialGameState());
+  app.state.coins = 100;
+  app.state.cropInventory.tomato = 10;
+  app.state.market.selectedQuantities.tomato = 10;
+
+  app.startSelling();
+  t.mock.timers.tick(3000);
+
+  const simulation = app.state.market.activeSimulation;
+  app.state.market.skipAnimation = true;
+  app.finalizeMarketSimulation(app.getMarketLocationProfile(), simulation, app.state.market.activeSelectedCrops);
+  const indexAfterSkip = app.state.market.currentCustomerIndex;
+  const summaryAfterSkip = app.state.market.lastSummary;
+
+  t.mock.timers.tick(60000);
+
+  assert.equal(app.state.market.currentCustomerIndex, indexAfterSkip);
+  assert.equal(app.state.market.lastSummary, summaryAfterSkip);
+});
+
+test('hand holds a current and a next block; Next swaps them', () => {
+  Object.assign(app.state, app.createInitialGameState());
+  const [current, next] = app.state.hand.slots;
+
+  assert.equal(app.state.hand.slots.length, 2);
+
+  app.swapHandBlocks();
+
+  assert.equal(app.state.hand.slots[0], next);
+  assert.equal(app.state.hand.slots[1], current);
+});
+
+test('placing the current block promotes the next block and draws a new one', () => {
+  Object.assign(app.state, app.createInitialGameState());
+  const next = app.state.hand.slots[1];
+
+  app.advanceHand();
+
+  assert.equal(app.state.hand.slots[0], next);
+  assert.notEqual(app.state.hand.slots[1], next);
+  assert.equal(app.state.hand.slots[1].cells.length, 4);
+});
+
+test('hand cards render only the block cells, without the shape type', () => {
+  Object.assign(app.state, app.createInitialGameState());
+
+  app.render();
+
+  const html = appElement.innerHTML;
+  assert.equal(html.match(/class="slot-cell/g)?.length, 8);
+  assert.match(html, /<div class="shape-name">Current<\/div>/);
+  assert.match(html, /<div class="shape-name">Next<\/div>/);
+  assert.match(html, /<div class="shape-name">Current<\/div>[\s\S]*id="hand-next-button"[\s\S]*<div class="shape-name">Next<\/div>/);
+  assert.match(html, /aria-label="Swap">🔁<\/button>/);
+});
