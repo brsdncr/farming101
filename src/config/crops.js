@@ -60,12 +60,21 @@ export const INITIAL_INVENTORY = {
 
 export const INITIAL_CROP_INVENTORY = Object.fromEntries(CROP_KEYS.map((crop) => [crop, 0]));
 
-// minVariety: how many different crop types a trip to this market must bring.
+// unlockCost: coins to open the market (0 = available from the start; placeholder values until balancing).
+// minVariety: how many crop types, each with at least MIN_UNITS_FOR_VARIETY units, a trip must bring.
+// A market's customers only buy the crops listed in its MARKET_DEMAND_WEIGHTS entry.
 export const MARKET_LOCATIONS = {
-  village: { label: 'Village', entryFee: 5, trafficMin: 50, trafficMax: 100, competitors: 1, minVariety: 2 },
-  town: { label: 'Town', entryFee: 100, trafficMin: 250, trafficMax: 750, competitors: 2, minVariety: 3 },
-  city: { label: 'City', entryFee: 250, trafficMin: 1000, trafficMax: 5000, competitors: 3, minVariety: 4 },
+  village: { label: 'Village', unlockCost: 0, trafficMin: 50, trafficMax: 100, minVariety: 2 },
+  town: { label: 'Town', unlockCost: 2000, trafficMin: 250, trafficMax: 750, minVariety: 3 },
+  city: { label: 'City', unlockCost: 25000, trafficMin: 1000, trafficMax: 5000, minVariety: 4 },
 };
+
+export const MIN_UNITS_FOR_VARIETY = 3;
+
+// Customer demand curve: MARKET_BASE_BUY_RATE of customers buy at the base price;
+// MARKET_PRICE_SENSITIVITY controls how quickly that share falls as the price rises.
+export const MARKET_BASE_BUY_RATE = 0.7;
+export const MARKET_PRICE_SENSITIVITY = 4;
 
 // Connected same-crop groups of this size or larger are harvested automatically after placement.
 export const AUTO_HARVEST_MIN_GROUP_SIZE = 5;
@@ -73,24 +82,6 @@ export const AUTO_HARVEST_MIN_GROUP_SIZE = 5;
 // The emergency harvest clears the whole field; the player holds at most one and restocks it in the shop.
 export const EMERGENCY_HARVEST_MAX_CHARGES = 1;
 export const EMERGENCY_HARVEST_COST = 50;
-
-export const MARKET_RIVAL_STAGES = {
-  village: {
-    productPool: ['tomato', 'carrot', 'pumpkin', 'beetroot'],
-    maxProducts: 3,
-    stockCapacity: 30,
-  },
-  town: {
-    productPool: ['tomato', 'carrot', 'pumpkin', 'onion', 'beetroot', 'cherry'],
-    maxProducts: 5,
-    stockCapacity: 100,
-  },
-  city: {
-    productPool: CROP_KEYS,
-    maxProducts: CROP_KEYS.length,
-    stockCapacity: 300,
-  },
-};
 
 export const MARKET_DEMAND_WEIGHTS = {
   village: { tomato: 5, carrot: 4, pumpkin: 1, beetroot: 1 },

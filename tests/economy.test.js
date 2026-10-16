@@ -22,40 +22,38 @@ test('inventory displays each crop level', () => {
   assert.match(appElement.innerHTML, /Level: 0/);
 });
 
-test('market settlement pays player revenue once, returns leftovers as seeds, and clears crop stock', () => {
+test('market settlement pays revenue once, keeps seeds unchanged, and clears all harvested crops', () => {
   Object.assign(app.state, app.createInitialGameState());
   app.state.inventory = { tomato: 5, carrot: 0, pumpkin: 0, onion: 0, beetroot: 0, cherry: 0, watermelon: 0, eggplant: 0 };
-  app.state.cropInventory = { tomato: 20, carrot: 0, pumpkin: 0, onion: 0, beetroot: 0, cherry: 0, watermelon: 0, eggplant: 0 };
+  // onion is not bought in the Village, so it spoils along with unsold tomatoes.
+  app.state.cropInventory = { tomato: 20, carrot: 0, pumpkin: 0, onion: 4, beetroot: 0, cherry: 0, watermelon: 0, eggplant: 0 };
   app.state.coins = 100;
-  app.state.market = app.createMarketState();
-  app.state.market.crop = 'tomato';
-  app.state.market.selectedQuantities.tomato = 10;
-  app.state.market.prices.tomato = 8;
   app.state.market.simulating = true;
 
-  const profile = { label: 'Village', entryFee: 5 };
+  const profile = { label: 'Village' };
   const simulation = {
     sellers: [{
       name: 'You',
-      customers: 1,
-      requested: 1,
+      customers: 6,
+      requested: 6,
       sold: 6,
       revenue: 48,
       crops: { tomato: 6 },
+      cropSales: { tomato: { quantity: 6, price: 8, revenue: 48 } },
     }],
-    totalCustomers: 1,
-    totalRequested: 1,
+    totalCustomers: 6,
+    totalRequested: 6,
     totalSold: 6,
     totalRevenue: 48,
   };
   app.state.market.activeSimulation = simulation;
-  app.finalizeMarketSimulation(profile, simulation, ['tomato']);
-  app.finalizeMarketSimulation(profile, simulation, ['tomato']);
+  app.finalizeMarketSimulation(profile, simulation);
+  app.finalizeMarketSimulation(profile, simulation);
 
-  assert.equal(app.state.inventory.tomato, 15);
-  assert.equal(app.state.cropInventory.tomato, 0);
-  assert.equal(app.state.market.selectedQuantities.tomato, 0);
-  assert.equal(app.state.coins, 100 + 48 - 5);
+  assert.equal(app.state.inventory.tomato, 5);
+  assert.ok(Object.values(app.state.cropInventory).every((value) => value === 0));
+  assert.equal(app.state.coins, 100 + 48);
+  assert.match(app.state.market.lastSummary, /onion: 4 spoiled/);
 });
 
 test('game over triggers only when coins cannot cover harvest', () => {
@@ -77,18 +75,6 @@ test('city entry fee alone does not trigger game over', () => {
 
   assert.equal(result, false);
   assert.equal(app.state.gameOver, false);
-});
-
-test('slider quantity updates without forcing a full render', () => {
-  app.state.cropInventory.tomato = 12;
-  app.state.market.selectedQuantities.tomato = 0;
-  app.state.market.crop = 'tomato';
-  appElement.renderCount = 0;
-
-  app.setMarketQuantity(7, 'tomato', false);
-
-  assert.equal(app.state.market.selectedQuantities.tomato, 7);
-  assert.equal(appElement.renderCount, 0);
 });
 
 const emptyInventory = () => ({ tomato: 0, carrot: 0, pumpkin: 0, onion: 0, beetroot: 0, cherry: 0, watermelon: 0, eggplant: 0 });
@@ -186,14 +172,15 @@ test('skipping the sale animation stops the customer loop', (t) => {
   Object.assign(app.state, app.createInitialGameState());
   app.state.coins = 100;
   app.state.cropInventory.tomato = 10;
-  app.state.market.selectedQuantities.tomato = 10;
+  app.state.cropInventory.carrot = 5;
 
   app.startSelling();
+  assert.equal(app.state.market.saleScreenOpen, true);
   t.mock.timers.tick(3000);
 
   const simulation = app.state.market.activeSimulation;
   app.state.market.skipAnimation = true;
-  app.finalizeMarketSimulation(app.getMarketLocationProfile(), simulation, app.state.market.activeSelectedCrops);
+  app.finalizeMarketSimulation(app.getMarketLocationProfile(), simulation);
   const indexAfterSkip = app.state.market.currentCustomerIndex;
   const summaryAfterSkip = app.state.market.lastSummary;
 
