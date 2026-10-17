@@ -2305,7 +2305,6 @@ function render() {
           ${renderBoard()}
 
           <div class="hand-section">
-            <h2>Hand</h2>
             <div class="hand-grid ${state.upgrades.hold ? 'with-hold' : ''}">${renderHandSlots()}</div>
           </div>
         </section>
@@ -2319,11 +2318,9 @@ function render() {
                   <span class="inventory-swatch"><span class="inventory-emoji">${CROP_EMOJIS[name] ?? '🌱'}</span></span>
                   <span>${name}</span>
                 </span>
-                <div class="inventory-amounts">
-                  <strong class="inventory-level">Level: ${getCropSeedLevel(name)}</strong>
-                  <strong>Seeds: ${amount}</strong>
-                  <strong>Harvest: ${state.cropInventory[name] ?? 0}</strong>
-                </div>
+                <span class="inventory-level" title="Seed level">Lv ${getCropSeedLevel(name)}</span>
+                <span class="inventory-count" title="Seeds">🌱 ${amount}</span>
+                <span class="inventory-count" title="Harvested, ready for market">🧺 ${state.cropInventory[name] ?? 0}</span>
               </li>
             `).join('')}
           </ul>
@@ -2619,10 +2616,19 @@ function bindInteractions() {
     }
 
     const hoveredCard = event.target.closest?.('.tetromino-card');
+    const overGame = dragState.active || hoveredCard || event.target.closest?.('.board-grid');
+    if (!overGame) {
+      return;
+    }
+
+    // Rotation is throttled, but every wheel event over the game is consumed: a trackpad sends many
+    // events per gesture, and the throttled ones used to scroll the page.
+    event.preventDefault();
+
     const slotIndex = dragState.active
       ? dragState.slotIndex
       : hoveredCard ? Number(hoveredCard.dataset.slotIndex) : null;
-    if (slotIndex === null || slotIndex === undefined || !Number.isInteger(slotIndex)) {
+    if (!Number.isInteger(slotIndex)) {
       return;
     }
 
@@ -2633,7 +2639,6 @@ function bindInteractions() {
     }
 
     lastWheelTimestamp = now;
-    event.preventDefault();
     rotateSelectedTetromino(slotIndex);
   }, { passive: false });
 }

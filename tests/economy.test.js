@@ -18,8 +18,8 @@ test('inventory displays each crop level', () => {
 
   app.render();
 
-  assert.match(appElement.innerHTML, /Level: 3/);
-  assert.match(appElement.innerHTML, /Level: 0/);
+  assert.match(appElement.innerHTML, /Lv 3</);
+  assert.match(appElement.innerHTML, /Lv 0</);
 });
 
 test('market settlement pays revenue once, keeps seeds unchanged, and clears all harvested crops', () => {

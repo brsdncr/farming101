@@ -68,7 +68,9 @@ Standard 4-block polyominoes (7 types):
 
   * **Placement:** Drag-and-drop.
 
-  * **Rotation:** Mouse wheel scroll or touchpad up/down gesture over the Current card (or while dragging).
+  * **Rotation:** Mouse wheel scroll or touchpad up/down gesture over the Current card (or while dragging). Over the hand or field, the wheel never scrolls the page.
+
+* **Layout:** The farm screen (top bar, field, hand and sidebar) always fits the window without scrolling (from 1280×720 up); the field grows with the window height.
 
 ### 3.4 Seed Stock & Tetromino Filling
 

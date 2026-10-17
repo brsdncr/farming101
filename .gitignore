@@ -166,3 +166,6 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Local design reference images (not part of the game)
+reference_images/
