@@ -7,3 +7,6 @@ export const VISITS_PER_SEASON = VISITS_PER_YEAR / SEASONS.length;
 
 // Reaching this many coins wins the game; the score is the age it took.
 export const GOAL_COINS = 1_000_000;
+
+// Farm upgrade bought in the Shop: the hold slot adds a third hand card to park a block for later.
+export const HOLD_SLOT_COST = 1500;

@@ -29,6 +29,7 @@ import {
 import {
   DEATH_AGE,
   GOAL_COINS,
+  HOLD_SLOT_COST,
   SEASONS,
   START_AGE,
   VISITS_PER_SEASON,
@@ -464,6 +465,7 @@ function createHandState(inventory) {
   return {
     bag,
     slots,
+    hold: null,
   };
 }
 
@@ -550,6 +552,20 @@ function unlockMarket(locationKey) {
   state.coins -= profile.unlockCost;
   state.unlockedMarkets[locationKey] = true;
   state.shopFeedback = { message: `${profile.label} market unlocked`, kind: 'success' };
+  render();
+  return true;
+}
+
+// ---------- Farm upgrades ----------
+
+function buyHoldSlot() {
+  if (state.upgrades.hold || state.coins < HOLD_SLOT_COST) {
+    return false;
+  }
+
+  state.coins -= HOLD_SLOT_COST;
+  state.upgrades.hold = true;
+  state.shopFeedback = { message: 'Hold slot unlocked', kind: 'success' };
   render();
   return true;
 }
@@ -964,6 +980,7 @@ function createInitialGameState() {
     emergencyHarvests: EMERGENCY_HARVEST_MAX_CHARGES,
     combo: 0,
     contracts: { offers: [], active: [], nextId: 1 },
+    upgrades: { hold: false },
     lastHarvestUnits: 0,
     lastHarvestCrops: [],
     harvestFeedback: '',
@@ -985,8 +1002,8 @@ function advanceTime() {
   expireContracts();
 }
 
-// The next thing worth saving for: the cheapest locked market, or the cheapest locked crop that an
-// open market buys. Once everything is unlocked, the coin goal itself.
+// The next thing worth saving for: the cheapest locked market, the hold slot, or locked crop that an
+// open market buys. Once everything is bought, the coin goal itself.
 function getNextGoal() {
   const lockedMarkets = Object.entries(MARKET_LOCATIONS)
     .filter(([locationKey]) => !isMarketUnlocked(locationKey))
@@ -998,7 +1015,9 @@ function getNextGoal() {
     .filter((crop) => getCropSeedLevel(crop) === 0 && sellableCrops.has(crop))
     .map((crop) => ({ label: getCropSeedConfig(crop).label, cost: getUnlockCost(crop) }));
 
-  const next = [...lockedMarkets, ...lockedCrops].sort((a, b) => a.cost - b.cost)[0]
+  const upgrades = state.upgrades.hold ? [] : [{ label: 'Hold slot', cost: HOLD_SLOT_COST }];
+
+  const next = [...lockedMarkets, ...lockedCrops, ...upgrades].sort((a, b) => a.cost - b.cost)[0]
     ?? { label: 'Millionaire', cost: GOAL_COINS };
   return { ...next, progress: Math.min(1, state.coins / next.cost), ready: state.coins >= next.cost };
 }
@@ -1168,10 +1187,28 @@ function nextTetrominoInBag(inventory) {
 // After the current block is placed, the next block moves up and a new next block is drawn.
 function advanceHand() {
   state.hand.slots[CURRENT_SLOT] = state.hand.slots[NEXT_SLOT];
-  const available = getUnreservedInventory(state.inventory, state.hand.slots, NEXT_SLOT);
+  const available = getUnreservedInventory(state.inventory, [state.hand.slots[CURRENT_SLOT], state.hand.hold]);
   const { tetromino, bag } = nextTetrominoInBag(available);
   state.hand.slots[NEXT_SLOT] = tetromino;
   state.hand.bag = bag;
+}
+
+// Hold slot upgrade: park the current block. With an empty hold the hand moves on to the next
+// block; otherwise the current and held blocks trade places.
+function holdBlock() {
+  if (!state.upgrades.hold || dragState.active) {
+    return;
+  }
+
+  const current = state.hand.slots[CURRENT_SLOT];
+  if (state.hand.hold) {
+    state.hand.slots[CURRENT_SLOT] = state.hand.hold;
+    state.hand.hold = current;
+  } else {
+    state.hand.hold = current;
+    advanceHand();
+  }
+  render();
 }
 
 function swapHandBlocks() {
@@ -1354,11 +1391,12 @@ function getBoardCellFromPointer(event) {
   }
 
   const rect = board.getBoundingClientRect();
-  const size = rect.width / GRID_SIZE;
+  const fieldSize = state.grid.length;
+  const size = rect.width / fieldSize;
   const x = Math.floor((event.clientX - rect.left) / size);
   const y = Math.floor((event.clientY - rect.top) / size);
 
-  if (!isInsideGrid(y, x, GRID_SIZE, GRID_SIZE)) {
+  if (!isInsideGrid(y, x, fieldSize, fieldSize)) {
     return null;
   }
 
@@ -1408,7 +1446,7 @@ function updateDragPreview(event) {
   const boardCells = board.querySelectorAll('.board-cell');
   const firstCell = boardCells[0]?.getBoundingClientRect();
   const nextCell = boardCells[1]?.getBoundingClientRect();
-  const nextRowCell = boardCells[GRID_SIZE]?.getBoundingClientRect();
+  const nextRowCell = boardCells[state.grid[0].length]?.getBoundingClientRect();
 
   if (firstCell && nextCell && nextRowCell) {
     const columnStep = nextCell.left - firstCell.left;
@@ -1427,8 +1465,8 @@ function updateDragPreview(event) {
   }
 
   const metrics = dragState.boardMetrics;
-  const columnStep = metrics?.columnStep ?? rect.width / GRID_SIZE;
-  const rowStep = metrics?.rowStep ?? rect.height / GRID_SIZE;
+  const columnStep = metrics?.columnStep ?? rect.width / state.grid[0].length;
+  const rowStep = metrics?.rowStep ?? rect.height / state.grid.length;
   const pointerX = event.clientX - rect.left;
   const pointerY = event.clientY - rect.top;
 
@@ -1515,8 +1553,8 @@ function renderCropPixelArt(cropType, opacity = 1) {
 function renderBoard() {
   const cells = [];
 
-  for (let row = 0; row < GRID_SIZE; row += 1) {
-    for (let col = 0; col < GRID_SIZE; col += 1) {
+  for (let row = 0; row < state.grid.length; row += 1) {
+    for (let col = 0; col < state.grid[row].length; col += 1) {
       const crop = state.grid[row][col];
       const previewCell = state.dragPreview && state.dragPreview.tetromino.cells.find((cell) => row === state.dragPreview.row + cell.row && col === state.dragPreview.col + cell.col);
       const isPreview = !!previewCell;
@@ -1555,7 +1593,7 @@ function renderBoard() {
   }
 
   const burst = state.harvestFlash ? `<div class="harvest-burst" aria-hidden="true">${state.harvestFlash.text}</div>` : '';
-  return `<div class="board-grid">${cells.join('')}${renderBoardDragPreview()}${burst}</div>`;
+  return `<div class="board-grid" style="grid-template-columns:repeat(${state.grid[0].length}, minmax(36px, 1fr));">${cells.join('')}${renderBoardDragPreview()}${burst}</div>`;
 }
 
 function renderBoardDragPreview() {
@@ -1591,28 +1629,44 @@ function renderBoardDragPreview() {
   `;
 }
 
+// Draws a block centred in a card. The mini grid has 8x8 half-size tracks and each block cell
+// spans 2, so any shape can be centred exactly.
+function renderMiniBlock(tetromino) {
+  const cellsOf = tetromino?.cells ?? [];
+  const shapeWidth = Math.max(0, ...cellsOf.map((cell) => cell.col + 1));
+  const shapeHeight = Math.max(0, ...cellsOf.map((cell) => cell.row + 1));
+  const colOffset = 4 - shapeWidth;
+  const rowOffset = 4 - shapeHeight;
+  return cellsOf.map((cell) => `
+    <div
+      class="slot-cell filled"
+      style="grid-row:${rowOffset + cell.row * 2 + 1} / span 2; grid-column:${colOffset + cell.col * 2 + 1} / span 2; background:#3c2d22; border-color:rgba(255,255,255,0.08);"
+    >
+      ${cell.cropType ? renderCropPixelArt(cell.cropType, 1) : ''}
+    </div>
+  `).join('');
+}
+
+function renderHoldCard() {
+  const held = state.hand.hold;
+  return `
+    <div class="tetromino-card hold-card" data-slot-index="hold">
+      <div class="shape-name">Hold</div>
+      <div class="mini-grid">${renderMiniBlock(held)}</div>
+      <button id="hand-hold-button" type="button" class="shop-button secondary hold-button" title="${held ? 'Swap the current block with the held one' : 'Park the current block for later'}">
+        ${held ? '⇄ Swap with current' : '📥 Hold current'}
+      </button>
+    </div>
+  `;
+}
+
 function renderHandSlots() {
   const cards = state.hand.slots
     .map((tetromino, index) => {
-      const safeTetromino = tetromino && tetromino.cells ? tetromino : { shapeType: 'O', cells: [] };
-      const shapeWidth = Math.max(0, ...safeTetromino.cells.map((cell) => cell.col + 1));
-      const shapeHeight = Math.max(0, ...safeTetromino.cells.map((cell) => cell.row + 1));
-      // The mini grid has 8x8 half-size tracks and each block spans 2, so any shape can be centered exactly.
-      const colOffset = 4 - shapeWidth;
-      const rowOffset = 4 - shapeHeight;
-      const cells = safeTetromino.cells.map((cell) => `
-        <div
-          class="slot-cell filled"
-          style="grid-row:${rowOffset + cell.row * 2 + 1} / span 2; grid-column:${colOffset + cell.col * 2 + 1} / span 2; background:#3c2d22; border-color:rgba(255,255,255,0.08);"
-        >
-          ${cell.cropType ? renderCropPixelArt(cell.cropType, 1) : ''}
-        </div>
-      `);
-
       return `
         <div class="tetromino-card ${index === NEXT_SLOT ? 'next-card' : ''} ${state.activeSlotIndex === index ? 'selected' : ''}" data-slot-index="${index}">
           <div class="shape-name">${index === CURRENT_SLOT ? 'Current' : 'Next'}</div>
-          <div class="mini-grid">${cells.join('')}</div>
+          <div class="mini-grid">${renderMiniBlock(tetromino)}</div>
         </div>
       `;
     });
@@ -1621,6 +1675,7 @@ function renderHandSlots() {
     ${cards[CURRENT_SLOT]}
     <button id="hand-next-button" type="button" class="swap-button" title="Swap the current block with the next one" aria-label="Swap">🔁</button>
     ${cards[NEXT_SLOT]}
+    ${state.upgrades.hold ? renderHoldCard() : ''}
   `;
 }
 
@@ -1749,6 +1804,27 @@ function renderContractsShopRow() {
   `;
 }
 
+function renderFarmUpgradeRows() {
+  return `
+    <div class="shop-row">
+      <div class="shop-row-header">
+        <div class="sale-row-label">
+          <span aria-hidden="true">📥</span>
+          <span>Hold slot</span>
+        </div>
+        <span class="shop-level-tag">${state.upgrades.hold ? 'Owned' : 'Locked'}</span>
+      </div>
+      <div class="shop-actions">
+        ${state.upgrades.hold ? '<span class="shop-maxed">Unlocked: park a block in the Hold card</span>' : `
+          <button type="button" class="shop-button secondary" data-shop-action="buy-hold" ${state.coins < HOLD_SLOT_COST ? 'disabled' : ''}>
+            Unlock (${HOLD_SLOT_COST.toLocaleString('en-US')})
+          </button>
+        `}
+      </div>
+    </div>
+  `;
+}
+
 function renderShopPanel() {
   if (!state.shopOpen) {
     return '';
@@ -1818,6 +1894,8 @@ function renderShopPanel() {
               </div>
             </div>
           `).join('')}
+
+          ${renderFarmUpgradeRows()}
 
           ${CROP_KEYS.map((cropKey) => {
             const config = getCropSeedConfig(cropKey);
@@ -2228,7 +2306,7 @@ function render() {
 
           <div class="hand-section">
             <h2>Hand</h2>
-            <div class="hand-grid">${renderHandSlots()}</div>
+            <div class="hand-grid ${state.upgrades.hold ? 'with-hold' : ''}">${renderHandSlots()}</div>
           </div>
         </section>
 
@@ -2338,6 +2416,13 @@ function bindInteractions() {
       return;
     }
 
+    if (event.target.closest('#hand-hold-button')) {
+      if (!state.marketOpen) {
+        holdBlock();
+      }
+      return;
+    }
+
     const handNextButton = event.target.closest('#hand-next-button');
     if (handNextButton) {
       if (!state.marketOpen) {
@@ -2407,6 +2492,10 @@ function bindInteractions() {
 
       if (action === 'accept-contract') {
         acceptContract(Number(shopAction.dataset.contractId));
+      }
+
+      if (action === 'buy-hold') {
+        buyHoldSlot();
       }
       return;
     }
@@ -2555,6 +2644,7 @@ export {
   advanceTime,
   autoHarvest,
   buildMarketCustomerSimulation,
+  buyHoldSlot,
   buySeedPack,
   checkForGameOver,
   continueGame,
@@ -2573,6 +2663,7 @@ export {
   getNextGoal,
   getUpgradeCost,
   getVarietyCount,
+  holdBlock,
   openMainMenu,
   render,
   restockEmergencyHarvest,

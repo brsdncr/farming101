@@ -1261,6 +1261,26 @@ h1, h2 {
   background: rgba(255,255,255,0.14);
 }
 
+.hand-grid.with-hold {
+  grid-template-columns: minmax(80px, 1fr) auto minmax(80px, 1fr) minmax(80px, 1fr);
+  /* Equal-height cards, since the Hold card also has a button. */
+  align-items: stretch;
+}
+
+.hand-grid.with-hold .swap-button {
+  align-self: center;
+}
+
+.tetromino-card.hold-card {
+  cursor: default;
+}
+
+.hold-button {
+  display: block;
+  margin: 8px auto 0;
+  font-size: 0.8rem;
+}
+
 .tetromino-card.next-card {
   opacity: 0.6;
   cursor: default;

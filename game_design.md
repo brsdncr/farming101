@@ -48,6 +48,14 @@ A pixel-art tile-placement and farming economy strategy game. Players plant crop
 
 * Hand cards show only the tetromino's blocks, centered; the shape letter is not shown.
 
+* **Hold Slot (upgrade, 1,500 coins in the Shop):** Adds a third card, **Hold**, after Next.
+
+  * With an empty hold, **📥 Hold current** parks the Current block there; Next becomes Current and a new Next is drawn.
+
+  * With a block held, **⇄ Swap with current** trades the Current and held blocks. The held block can't be placed directly; swap it back first.
+
+  * Seeds shown in the held block are reserved like the other cards. The hold empties when a new season starts (its seeds stay in stock).
+
 ### 3.3 Tetromino Definitions & Controls
 
 Standard 4-block polyominoes (7 types):
@@ -278,7 +286,7 @@ Short goals between unlocks: deliver a quantity of one crop to one market within
 
 * **Next Goal:** The next thing worth saving for, with a progress bar: the cheapest locked market, or the cheapest locked crop that an open market buys. It reads "ready" once affordable (unlock it in the Shop after the next sale). Once everything is unlocked, it shows progress toward 1,000,000 coins.
 
-  * In a typical run the order is Pumpkin → Beetroot → Town market → Onion → Cherry → City market → Eggplant → Watermelon → Millionaire.
+  * Farm upgrades (the Hold slot) are part of the ladder. In a typical run the order is Pumpkin → Beetroot → Hold slot → Town market → Onion → Cherry → City market → Eggplant → Watermelon → Millionaire.
 
 ### 7.2 Endings
 
@@ -297,6 +305,8 @@ Game endings are evaluated on the main screen, after the sale summary has been c
 Opens after each market visit (or skipped season).
 
 * **Contracts:** Accept up to 2 of the new offers (see §6.5).
+
+* **Farm Upgrades:** Unlock the Hold slot (1,500; see §3.2).
 
 * **Emergency Harvest:** Restock the single charge (2% of coins, at least 50).
 
@@ -373,6 +383,8 @@ Planned to occur automatically on a regular cycle. Examples:
 
 * **City's 4-type variety minimum is hard for light players.** Because tetrominoes mix all seed types at random, minor crops rarely form groups of 5. Options: let the player choose which seeds go into tetrominoes, lower City's minimum to 3, or relax how variety is counted.
 
+* **Bigger fields were tested and postponed.** Field upgrades (7×7, 8×8) remove most field clogging, which makes the whole economy much faster: even a single 7×7 upgrade moved the engaged player's millionaire age from ~54 to ~40, almost regardless of its price (5,000 to 100,000). Restoring age ~55 by lowering crop prices widened the gap between casual and heavy players instead. Field size is worth revisiting together with a decision on game length or the seed-bag idea. The board and drag code already read the field size from the grid, so adding sizes later is easy.
+
 * **Game length.** If a shorter game is wanted, make each visit richer rather than reducing the number of visits.
 
 ## 12. Technical & Architectural Guidelines
@@ -383,7 +395,7 @@ Planned to occur automatically on a regular cycle. Examples:
 
   * `src/config/crops.js` — crops, crop economy, seed config and upgrade costs, markets, demand curve, harvest and Emergency constants.
 
-  * `src/config/game.js` — calendar, ages and the coin goal.
+  * `src/config/game.js` — calendar, ages, the coin goal, and farm upgrade prices.
 
   * `src/config/shapes.js` — tetromino shapes.
 

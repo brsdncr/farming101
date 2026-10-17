@@ -23,6 +23,9 @@ test('crops only sold in locked markets are skipped until that market opens', ()
   app.state.seedLevels.pumpkin = 1;
   app.state.seedLevels.beetroot = 1;
 
+  assert.equal(app.getNextGoal().label, 'Hold slot', 'the hold slot (1,500) comes before the Town market (2,000)');
+
+  app.state.upgrades.hold = true;
   assert.equal(app.getNextGoal().label, 'Town market');
 
   app.state.unlockedMarkets.town = true;
@@ -38,6 +41,7 @@ test('next goal is ready once affordable, and becomes the coin goal when everyth
     app.state.seedLevels[crop] = 1;
   }
   Object.keys(app.state.unlockedMarkets).forEach((key) => { app.state.unlockedMarkets[key] = true; });
+  app.state.upgrades = { hold: true };
   app.state.coins = 250_000;
 
   const goal = app.getNextGoal();

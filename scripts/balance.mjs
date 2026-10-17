@@ -14,7 +14,7 @@ import {
   MARKET_LOCATIONS,
 } from '../src/config/crops.js';
 import { DEATH_AGE, GOAL_COINS, START_AGE, VISITS_PER_YEAR } from '../src/config/game.js';
-import { GRID_SIZE, canPlaceShape } from '../src/state/gridState.js';
+import { canPlaceShape } from '../src/state/gridState.js';
 
 const TILES_PER_VISIT = Number(process.argv[2] ?? 100);
 const RUNS = Number(process.argv[3] ?? 10);
@@ -64,6 +64,7 @@ function rotations(cells) {
 
 // Rewards completing groups that auto-harvest (by their real yield), and otherwise growing same-crop groups.
 function scoreMove(grid, cells, originRow, originCol) {
+  const fieldSize = grid.length;
   const placed = grid.map((row) => row.slice());
   for (const cell of cells) {
     placed[originRow + cell.row][originCol + cell.col] = cell.cropType ?? null;
@@ -76,7 +77,7 @@ function scoreMove(grid, cells, originRow, originCol) {
       continue;
     }
 
-    const startKey = (originRow + cell.row) * GRID_SIZE + originCol + cell.col;
+    const startKey = (originRow + cell.row) * fieldSize + originCol + cell.col;
     if (seen.has(startKey)) {
       continue;
     }
@@ -87,11 +88,11 @@ function scoreMove(grid, cells, originRow, originCol) {
     while (queue.length > 0) {
       const key = queue.pop();
       size += 1;
-      const row = Math.floor(key / GRID_SIZE);
-      const col = key % GRID_SIZE;
+      const row = Math.floor(key / fieldSize);
+      const col = key % fieldSize;
       for (const [nextRow, nextCol] of [[row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]]) {
-        const nextKey = nextRow * GRID_SIZE + nextCol;
-        if (nextRow >= 0 && nextRow < GRID_SIZE && nextCol >= 0 && nextCol < GRID_SIZE
+        const nextKey = nextRow * fieldSize + nextCol;
+        if (nextRow >= 0 && nextRow < fieldSize && nextCol >= 0 && nextCol < fieldSize
           && !seen.has(nextKey) && placed[nextRow][nextCol] === cell.cropType) {
           seen.add(nextKey);
           queue.push(nextKey);
@@ -113,8 +114,8 @@ function bestMove(grid, tetromino) {
 
   let best = null;
   for (const cells of rotations(tetromino.cells)) {
-    for (let row = 0; row < GRID_SIZE; row += 1) {
-      for (let col = 0; col < GRID_SIZE; col += 1) {
+    for (let row = 0; row < grid.length; row += 1) {
+      for (let col = 0; col < grid.length; col += 1) {
         if (!canPlaceShape(grid, { cells }, row, col)) {
           continue;
         }
@@ -426,10 +427,11 @@ console.log(`Balance: ${RUNS} careers, ${TILES_PER_VISIT} tiles planted per visi
 console.log(`  Reached ${GOAL_COINS.toLocaleString('en-US')} coins: ${winners.length}/${RUNS}`
   + (winners.length ? `, median age ${ageAt(median(winners.map((result) => result.visits)))}` : ''));
 console.log(`  Bankrupt: ${results.filter((result) => result.bankrupt).length}/${RUNS}`);
-for (const locationKey of Object.keys(MARKET_LOCATIONS).filter((key) => MARKET_LOCATIONS[key].unlockCost > 0)) {
-  const visits = results.map((result) => result.marketUnlockVisit[locationKey]).filter((visit) => visit !== undefined);
-  console.log(`  ${MARKET_LOCATIONS[locationKey].label} unlocked: ${visits.length}/${RUNS}`
-    + (visits.length ? `, median age ${ageAt(median(visits))}` : ''));
+const milestones = Object.keys(MARKET_LOCATIONS).filter((key) => MARKET_LOCATIONS[key].unlockCost > 0)
+  .map((key) => ({ key, label: `${MARKET_LOCATIONS[key].label} unlocked` }));
+for (const { key, label } of milestones) {
+  const visits = results.map((result) => result.marketUnlockVisit[key]).filter((visit) => visit !== undefined);
+  console.log(`  ${label}: ${visits.length}/${RUNS}` + (visits.length ? `, median age ${ageAt(median(visits))}` : ''));
 }
 console.log(`  Median coins by age: ${[25, 30, 40, 50, 60, 70, 85].map((age) => `${age}: ${Math.round(coinsByAge(age) ?? 0).toLocaleString('en-US')}`).join(' · ')}`);
 const totals = results.reduce((sum, result) => ({
