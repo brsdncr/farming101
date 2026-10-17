@@ -1,5 +1,7 @@
 import {
   AUTO_HARVEST_MIN_GROUP_SIZE,
+  COMBO_MAX_MULTIPLIER,
+  COMBO_STEP_BONUS,
   CROP_BASE_PRICES,
   CROP_COLORS,
   CROP_EMOJIS,
@@ -7,11 +9,13 @@ import {
   CROP_SEED_CONFIG,
   EMERGENCY_HARVEST_COST,
   EMERGENCY_HARVEST_MAX_CHARGES,
+  HARVEST_SIZE_BONUSES,
   MARKET_BASE_BUY_RATE,
   MARKET_DEMAND_WEIGHTS,
   MARKET_LOCATIONS,
   MARKET_PRICE_SENSITIVITY,
   MIN_UNITS_FOR_VARIETY,
+  SEED_LEVEL_YIELD_BONUS,
   SEED_UPGRADE_COST_FACTOR,
   SEED_UPGRADE_COST_GROWTH,
 } from './src/config/crops.js';
@@ -46,6 +50,8 @@ import {
 const CURRENT_SLOT = 0;
 const NEXT_SLOT = 1;
 const HAND_SIZE = 2;
+// How long harvested tiles pop and the harvest burst floats over the board.
+const HARVEST_FLASH_MS = 900;
 
 const state = createInitialGameState();
 const dragState = {
@@ -236,11 +242,6 @@ function getUpgradeCost(cropKey) {
 
   const nextLevel = currentLevel + 1;
   return Math.round(getCropSeedPrice(cropKey) * SEED_UPGRADE_COST_FACTOR * SEED_UPGRADE_COST_GROWTH ** (nextLevel - 2));
-}
-
-function getCropHarvestYieldBonus(cropKey) {
-  const currentLevel = getCropSeedLevel(cropKey);
-  return Math.max(0, currentLevel - 1);
 }
 
 function setShopFeedback(message, kind = 'success') {
@@ -834,7 +835,9 @@ function createInitialGameState() {
     gameOverReason: '',
     gameResult: null,
     emergencyHarvests: EMERGENCY_HARVEST_MAX_CHARGES,
+    combo: 0,
     harvestFeedback: '',
+    harvestFlash: null,
   };
 }
 
@@ -926,6 +929,8 @@ function clearBoardForReturn() {
   state.activeSlotIndex = null;
   state.hand = createHandState(state.inventory);
   state.harvestFeedback = '';
+  state.harvestFlash = null;
+  state.combo = 0;
   state.market.simulationEvents = [];
   state.market.currentCustomerIndex = -1;
   state.market.saleReport = null;
@@ -964,20 +969,48 @@ function swapHandBlocks() {
   render();
 }
 
-// Harvesting is free: crops move from the field into the harvested stock for market,
-// and their cells are cleared. Returns the harvested quantities per crop.
-// Units harvested from one connected group of `tileCount` tiles.
-// Seed level bonus is a flat extra yield per harvested group, not per tile.
-function getHarvestYield(cropKey, tileCount, { withLevelBonus = true } = {}) {
-  return tileCount + (withLevelBonus ? getCropHarvestYieldBonus(cropKey) : 0);
+function getSizeBonus(tileCount) {
+  return HARVEST_SIZE_BONUSES.find((bonus) => tileCount >= bonus.minSize) ?? null;
 }
 
-function harvestGroups(groups, { withLevelBonus }) {
+function getSeedLevelMultiplier(cropKey) {
+  return 1 + SEED_LEVEL_YIELD_BONUS * Math.max(0, getCropSeedLevel(cropKey) - 1);
+}
+
+// `combo` is the group's position in the current harvest streak (1 = first group, no bonus).
+function getComboMultiplier(combo) {
+  return Math.min(COMBO_MAX_MULTIPLIER, 1 + COMBO_STEP_BONUS * Math.max(0, combo - 1));
+}
+
+// Units harvested from one connected group of `tileCount` tiles. Emergency harvests get no bonuses.
+function getHarvestYield(cropKey, tileCount, { withBonuses = true, combo = 1 } = {}) {
+  if (!withBonuses) {
+    return tileCount;
+  }
+
+  const sizeMultiplier = getSizeBonus(tileCount)?.multiplier ?? 1;
+  return Math.round(tileCount * sizeMultiplier * getSeedLevelMultiplier(cropKey) * getComboMultiplier(combo));
+}
+
+// Harvesting is free: crops move from the field into the harvested stock for market,
+// and their cells are cleared. Each bonus-eligible group extends the combo.
+function harvestGroups(groups, { withBonuses }) {
   const harvested = {};
+  const sizeLabels = new Set();
+  const flashCells = [];
 
   for (const group of groups) {
-    const quantity = getHarvestYield(group.cropType, group.cells.length, { withLevelBonus });
+    if (withBonuses) {
+      state.combo += 1;
+      const sizeBonus = getSizeBonus(group.cells.length);
+      if (sizeBonus) {
+        sizeLabels.add(`${sizeBonus.label} ×${sizeBonus.multiplier}`);
+      }
+    }
+
+    const quantity = getHarvestYield(group.cropType, group.cells.length, { withBonuses, combo: state.combo });
     harvested[group.cropType] = (harvested[group.cropType] ?? 0) + quantity;
+    flashCells.push(...group.cells.map((cell) => ({ ...cell, cropType: group.cropType })));
     state.grid = clearConnectedCells(state.grid, group.cells);
   }
 
@@ -985,33 +1018,65 @@ function harvestGroups(groups, { withLevelBonus }) {
     state.cropInventory[cropType] = (state.cropInventory[cropType] ?? 0) + quantity;
   }
 
-  return harvested;
+  const comboMultiplier = withBonuses ? getComboMultiplier(state.combo) : 1;
+  return { harvested, sizeLabels: [...sizeLabels], comboMultiplier, flashCells };
 }
 
-function describeHarvest(prefix, harvested) {
-  const crops = Object.entries(harvested)
-    .map(([cropType, quantity]) => `${CROP_EMOJIS[cropType] ?? '🌱'} ${quantity}`)
-    .join(' · ');
-  return `${prefix}: ${crops}`;
+function describeHarvest(prefix, { harvested, sizeLabels, comboMultiplier }) {
+  const parts = Object.entries(harvested)
+    .map(([cropType, quantity]) => `${CROP_EMOJIS[cropType] ?? '🌱'} ${quantity}`);
+  parts.push(...sizeLabels);
+  if (comboMultiplier > 1) {
+    parts.push(`Combo ×${Number(comboMultiplier.toFixed(1))}`);
+  }
+  return `${prefix}: ${parts.join(' · ')}`;
+}
+
+// Remembers what was just harvested so the board can play a short pop animation.
+function flashHarvest(result) {
+  const total = Object.values(result.harvested).reduce((sum, quantity) => sum + quantity, 0);
+  state.harvestFlash = {
+    key: Date.now(),
+    cells: result.flashCells,
+    text: `+${total}${result.comboMultiplier > 1 ? ` · Combo ×${Number(result.comboMultiplier.toFixed(1))}` : ''}`,
+  };
+}
+
+function scheduleHarvestFlashClear() {
+  const key = state.harvestFlash?.key;
+  if (!key || typeof setTimeout !== 'function') {
+    return;
+  }
+
+  setTimeout(() => {
+    if (state.harvestFlash?.key === key) {
+      state.harvestFlash = null;
+      render();
+    }
+  }, HARVEST_FLASH_MS);
 }
 
 // Runs after every placement: any group that has grown large enough is harvested.
+// A placement that harvests nothing breaks the combo.
 function autoHarvest() {
   const groups = findAllConnectedGroups(state.grid)
     .filter((group) => group.cells.length >= AUTO_HARVEST_MIN_GROUP_SIZE);
 
   if (groups.length === 0) {
+    state.combo = 0;
     return;
   }
 
-  state.harvestFeedback = describeHarvest('Auto-harvested', harvestGroups(groups, { withLevelBonus: true }));
+  const result = harvestGroups(groups, { withBonuses: true });
+  state.harvestFeedback = describeHarvest('Auto-harvested', result);
+  flashHarvest(result);
 }
 
 function isFieldEmpty() {
   return state.grid.every((row) => row.every((cell) => !cell));
 }
 
-// One-shot joker for a field clogged with small groups: harvests everything, without level bonus.
+// One-shot joker for a field clogged with small groups: harvests everything, without bonuses.
 function emergencyHarvest() {
   if (state.emergencyHarvests <= 0 || isFieldEmpty()) {
     return;
@@ -1019,8 +1084,12 @@ function emergencyHarvest() {
 
   const groups = findAllConnectedGroups(state.grid);
   state.emergencyHarvests -= 1;
-  state.harvestFeedback = describeHarvest('Emergency harvest', harvestGroups(groups, { withLevelBonus: false }));
+  state.combo = 0;
+  const result = harvestGroups(groups, { withBonuses: false });
+  state.harvestFeedback = describeHarvest('Emergency harvest', result);
+  flashHarvest(result);
   render();
+  scheduleHarvestFlashClear();
 }
 
 function restockEmergencyHarvest() {
@@ -1198,6 +1267,7 @@ function finishDrag(event) {
         state.harvestFeedback = '';
         autoHarvest();
         advanceHand();
+        scheduleHarvestFlashClear();
       }
     }
   }
@@ -1243,7 +1313,11 @@ function renderBoard() {
       ].filter(Boolean).join(' ');
 
       const artCrop = crop || previewCell?.cropType || null;
-      const artMarkup = artCrop ? renderCropPixelArt(artCrop, isPreview ? 0.8 : 1) : '';
+      // A just-harvested (now empty) tile briefly shows its crop popping away.
+      const poppedCell = !artCrop && state.harvestFlash?.cells.find((cell) => cell.row === row && cell.col === col);
+      const artMarkup = artCrop
+        ? renderCropPixelArt(artCrop, isPreview ? 0.8 : 1)
+        : poppedCell ? `<span class="harvest-pop">${renderCropPixelArt(poppedCell.cropType)}</span>` : '';
 
       cells.push(`
         <button
@@ -1260,7 +1334,8 @@ function renderBoard() {
     }
   }
 
-  return `<div class="board-grid">${cells.join('')}${renderBoardDragPreview()}</div>`;
+  const burst = state.harvestFlash ? `<div class="harvest-burst" aria-hidden="true">${state.harvestFlash.text}</div>` : '';
+  return `<div class="board-grid">${cells.join('')}${renderBoardDragPreview()}${burst}</div>`;
 }
 
 function renderBoardDragPreview() {
@@ -1500,7 +1575,7 @@ function renderShopPanel() {
                       data-shop-crop="${cropKey}"
                       ${!canAffordUpgrade ? 'disabled' : ''}
                     >
-                      Upgrade (${nextUpgradeCost}) · +${getCropHarvestYieldBonus(cropKey) + 1} yield
+                      Upgrade (${nextUpgradeCost}) · yield ×${Number((getSeedLevelMultiplier(cropKey) + SEED_LEVEL_YIELD_BONUS).toFixed(2))}
                     </button>
                   ` : '<span class="shop-maxed">Max level</span>') : `
                     <button

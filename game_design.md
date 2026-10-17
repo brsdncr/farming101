@@ -101,7 +101,7 @@ Tomato and Carrot are the cheap starter crops and are unlocked from the start. A
 
 * Unlocked crops start at level 1; the maximum level is 10.
 
-* **Yield Bonus:** Each harvested group of a crop yields $(\text{level} - 1)$ extra units, once per group (not per tile).
+* **Yield Bonus:** Each level above 1 adds **+15%** yield to that crop's auto-harvests ($\times 1.15$ at level 2 … $\times 2.35$ at level 10). The Shop shows the multiplier the next upgrade gives.
 
 * **Upgrade Cost:** Reaching level $L$ costs $\text{Seed Pack Cost} \times 2 \times 2^{L-2}$. Each level costs double the previous one.
 
@@ -125,11 +125,25 @@ The calendar alternates between summer and winter (see §7). The crops are group
 
 * A single tetromino (4 tiles) can never trigger a harvest alone; it must connect to at least one more same-crop tile.
 
-* Harvested units go into the harvest stock for the next market visit:
+* Harvested units go into the harvest stock for the next market visit, rounded per group:
 
-  * $\text{Units} = \text{Group Size} + (\text{Seed Level} - 1)$
+  * $\text{Units} = \text{Group Size} \times \text{Size Bonus} \times \text{Level Bonus} \times \text{Combo Bonus}$
 
-* The board header shows what was just harvested, e.g. "Auto-harvested: 🍅 5".
+* **Size Bonus:** Bigger groups pay more per tile, so building past 5 is rewarded.
+
+| Group Size | 5–7 | 8–11 (**Big**) | 12+ (**Huge**) |
+| ----- | ----- | ----- | ----- |
+| **Size Bonus** | ×1 | ×1.5 | ×2 |
+
+  * Because auto-harvest triggers as soon as a group reaches 5, Big and Huge groups come from joining tiles into 8+ in a single placement (e.g. dropping a 4-block next to a group of 4).
+
+* **Level Bonus:** $1 + 0.15 \times (\text{Seed Level} - 1)$ (see §4.2).
+
+* **Combo:** Every group harvested in a row adds +10% to the next one, up to ×2. Several groups harvested by one placement each extend the combo. A placement that harvests nothing, an Emergency harvest, or a new season resets it.
+
+  * *Example:* One group of 10 at level 1 yields 15. Two groups of 5 yield 5 + 6 (the second at Combo ×1.1).
+
+* **Feedback:** The board header shows what was just harvested, e.g. "Auto-harvested: 🍅 12 · Big ×1.5 · Combo ×1.2". The harvested tiles pop away and a floating "+12" rises over the board.
 
 ### 5.2 Emergency Harvest
 
@@ -137,7 +151,7 @@ A one-shot joker for a field clogged with groups too small to auto-harvest.
 
 * A big red **🚨 Emergency** button is fixed to the bottom-right of the screen. It shrinks on narrower screens (smaller pill, then icon only) to stay clear of the game area.
 
-* Clicking it harvests **every crop on the field**, without the seed level bonus.
+* Clicking it harvests **every crop on the field**, without any bonuses (size, level or combo), and resets the combo.
 
 * The player starts with 1 charge and can hold at most 1. Once used, the button shows "Used" until restocked.
 
@@ -147,7 +161,7 @@ A one-shot joker for a field clogged with groups too small to auto-harvest.
 
 ### 5.3 End of Season
 
-* Whatever is still planted when a market visit ends (sale finished or season skipped) is discarded. Each season starts with an empty field.
+* Whatever is still planted when a market visit ends (sale finished or season skipped) is discarded. Each season starts with an empty field and no combo.
 
 ## 6. Marketplace & Sales Simulation
 
@@ -266,7 +280,7 @@ The economy is tuned with a headless simulation that plays whole careers with th
 
 * **Run:** `npm run balance -- [tilesPerVisit] [runs]` (defaults: 100 tiles, 10 careers).
 
-* **Bot Player:** Picks the placement and rotation that best grows or completes groups, swaps when Next is better, prices each crop to maximise expected revenue, unlocks crops and markets while keeping a seed reserve, upgrades only when supply falls short of demand, and restocks the Emergency harvest.
+* **Bot Player:** Picks the placement and rotation that best grows groups or completes them (valuing completed groups by their real yield, so bigger groups score higher), swaps when Next is better, prices each crop to maximise expected revenue, unlocks crops and markets while keeping a seed reserve, upgrades only when supply falls short of demand, and restocks the Emergency harvest.
 
 * **Effort** (crop tiles planted per visit) is the key input: with auto-harvest, the field size does not cap output.
 
@@ -274,14 +288,16 @@ The economy is tuned with a headless simulation that plays whole careers with th
 
 | Tiles per Visit | 40 | 60 | 100 | 160 |
 | ----- | ----- | ----- | ----- | ----- |
-| **Reached 1,000,000** | 27/30 | 27/30 | 99/100 | 30/30 |
-| **Median Age at 1,000,000** | 82 | 64 | 55 | 52 |
+| **Reached 1,000,000** | 25/30 | 29/30 | 30/30 | 30/30 |
+| **Median Age at 1,000,000** | 83 | 65 | 54 | 52 |
 
 * Town is typically unlocked around age 24 and City around age 30–33.
 
 * Returns diminish above roughly 110 tiles per visit, because the field clogs faster than groups clear.
 
 * An engaged run is about 140 visits of around 25 placements each.
+
+* The bot looks only one move ahead, so it still harvests mostly at exactly 5 tiles; the size bonus mainly raises the ceiling for players who plan bigger groups.
 
 ## 10. Planned & Open Items
 

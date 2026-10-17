@@ -83,6 +83,21 @@ export const MARKET_PRICE_SENSITIVITY = 4;
 // Connected same-crop groups of this size or larger are harvested automatically after placement.
 export const AUTO_HARVEST_MIN_GROUP_SIZE = 5;
 
+// Auto-harvest yield per group = tiles × size bonus × seed level bonus × combo bonus (rounded).
+// Bigger groups pay more per tile, so growing a group past 5 is worth it. Highest tier first.
+export const HARVEST_SIZE_BONUSES = [
+  { minSize: 12, multiplier: 2, label: 'Huge' },
+  { minSize: 8, multiplier: 1.5, label: 'Big' },
+];
+
+// Each seed level above 1 adds this share of yield (level 10 = ×2.35 with 0.15).
+export const SEED_LEVEL_YIELD_BONUS = 0.15;
+
+// Every group harvested in a row adds COMBO_STEP_BONUS to the next one, up to COMBO_MAX_MULTIPLIER.
+// A placement that harvests nothing, an emergency harvest or a new season resets the combo.
+export const COMBO_STEP_BONUS = 0.1;
+export const COMBO_MAX_MULTIPLIER = 2;
+
 // The emergency harvest clears the whole field; the player holds at most one and restocks it in the shop.
 export const EMERGENCY_HARVEST_MAX_CHARGES = 1;
 export const EMERGENCY_HARVEST_COST = 50;

@@ -71,7 +71,7 @@ test('groups of five or more are auto-harvested with the level bonus; smaller gr
 
   app.autoHarvest();
 
-  // tomato: 5 tiles + level 3 bonus (2)
+  // tomato: 5 tiles × 1.3 (level 3) = 6.5, rounded
   assert.equal(app.state.cropInventory.tomato, 7);
   assert.equal(app.state.cropInventory.carrot, 0);
   assert.ok(app.state.grid[0].every((cell) => cell === null));

@@ -63,7 +63,7 @@ function rotations(cells) {
   return result;
 }
 
-// Rewards completing groups that auto-harvest, and otherwise growing same-crop groups.
+// Rewards completing groups that auto-harvest (by their real yield), and otherwise growing same-crop groups.
 function scoreMove(grid, cells, originRow, originCol) {
   const placed = grid.map((row) => row.slice());
   for (const cell of cells) {
@@ -100,7 +100,8 @@ function scoreMove(grid, cells, originRow, originCol) {
       }
     }
 
-    score += size >= AUTO_HARVEST_MIN_GROUP_SIZE ? size * 10 : size * size * 0.5;
+    // Completed groups are worth what they actually yield (bigger groups pay more per tile).
+    score += size >= AUTO_HARVEST_MIN_GROUP_SIZE ? app.getHarvestYield(cell.cropType, size) * 10 : size * size * 0.5;
   }
 
   return score;
