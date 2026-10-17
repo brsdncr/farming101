@@ -248,7 +248,11 @@ After the sale, a summary shows revenue per crop and a funnel for the player's s
 
 * The player starts at **age 20** and ages one year every 4 visits; age 85 is reached after 260 visits.
 
-* The HUD shows Round, Season, Age, and Coins / Goal.
+* The HUD shows Round, Season, Age, Coins / Goal, and the **Next Goal**.
+
+* **Next Goal:** The next thing worth saving for, with a progress bar: the cheapest locked market, or the cheapest locked crop that an open market buys. It reads "ready" once affordable (unlock it in the Shop after the next sale). Once everything is unlocked, it shows progress toward 1,000,000 coins.
+
+  * In a typical run the order is Pumpkin → Beetroot → Town market → Onion → Cherry → City market → Eggplant → Watermelon → Millionaire.
 
 ### 7.2 Endings
 

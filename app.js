@@ -869,6 +869,24 @@ function advanceTime() {
   Object.assign(state, getCalendar(state.round - 1));
 }
 
+// The next thing worth saving for: the cheapest locked market, or the cheapest locked crop that an
+// open market buys. Once everything is unlocked, the coin goal itself.
+function getNextGoal() {
+  const lockedMarkets = Object.entries(MARKET_LOCATIONS)
+    .filter(([locationKey]) => !isMarketUnlocked(locationKey))
+    .map(([, profile]) => ({ label: `${profile.label} market`, cost: profile.unlockCost }));
+  const sellableCrops = new Set(Object.keys(MARKET_LOCATIONS)
+    .filter(isMarketUnlocked)
+    .flatMap(getMarketProductPool));
+  const lockedCrops = CROP_KEYS
+    .filter((crop) => getCropSeedLevel(crop) === 0 && sellableCrops.has(crop))
+    .map((crop) => ({ label: getCropSeedConfig(crop).label, cost: getUnlockCost(crop) }));
+
+  const next = [...lockedMarkets, ...lockedCrops].sort((a, b) => a.cost - b.cost)[0]
+    ?? { label: 'Millionaire', cost: GOAL_COINS };
+  return { ...next, progress: Math.min(1, state.coins / next.cost), ready: state.coins >= next.cost };
+}
+
 function getCheapestSeedPackCost() {
   return Math.min(...CROP_KEYS.filter((crop) => getCropSeedLevel(crop) > 0).map(getCropSeedPrice));
 }
@@ -1490,6 +1508,25 @@ function renderHandSlots() {
   `;
 }
 
+function renderNextGoal() {
+  const goal = getNextGoal();
+  const isCoinGoal = goal.cost === GOAL_COINS;
+  const title = goal.ready && !isCoinGoal
+    ? `You can afford ${goal.label}. Unlock it in the shop after your next sale.`
+    : `Save up ${goal.cost.toLocaleString('en-US')} coins for ${goal.label}.`;
+  const value = goal.ready && !isCoinGoal
+    ? 'ready'
+    : `${state.coins.toLocaleString('en-US')} / ${goal.cost.toLocaleString('en-US')}`;
+
+  return `
+    <div class="stat goal-stat ${goal.ready ? 'ready' : ''}" title="${title}">
+      <span>Next: ${goal.label}</span>
+      <strong>${value}</strong>
+      <div class="goal-progress" aria-hidden="true"><div style="width:${Math.round(goal.progress * 100)}%"></div></div>
+    </div>
+  `;
+}
+
 function renderEmergencyButton() {
   if (state.marketOpen || state.shopOpen) {
     return '';
@@ -2009,6 +2046,7 @@ function render() {
           <div class="stat"><span>Season</span><strong>${state.season}</strong></div>
           <div class="stat"><span>Age</span><strong>${state.age}</strong></div>
           <div class="stat" title="Reach ${GOAL_COINS.toLocaleString('en-US')} coins before age ${DEATH_AGE}"><span>Coins / Goal</span><strong>${state.coins.toLocaleString('en-US')} / 1M</strong></div>
+          ${renderNextGoal()}
           <button id="menu-button" type="button" class="swap-button menu-button" title="Save and return to the main menu" aria-label="Main menu">☰</button>
         </div>
       </header>
@@ -2343,6 +2381,7 @@ export {
   getEmergencyRestockCost,
   getHarvestYield,
   getMarketLocationProfile,
+  getNextGoal,
   getUpgradeCost,
   getVarietyCount,
   openMainMenu,
