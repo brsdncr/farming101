@@ -484,50 +484,166 @@ h1, h2 {
   color: var(--muted);
 }
 
-.shop-panel {
-  max-height: min(80vh, 740px);
-  overflow: auto;
-}
 
-.shop-list {
+
+
+
+
+
+/* Seed shop: a full-screen view with groups of square tiles. */
+.shop-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
   display: grid;
-  gap: 10px;
+  place-items: center;
+  padding: 16px;
+  background: var(--bg);
 }
 
-.shop-row {
+.shop-screen-panel {
+  width: min(1100px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
   display: grid;
-  gap: 10px;
-  padding: 12px 10px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 12px;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 0 20px 45px var(--shadow);
 }
 
-.shop-row-header {
+.shop-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 
-.shop-level-tag {
-  display: inline-flex;
+.shop-header h2 {
+  flex: 1;
+}
+
+.shop-coins {
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.shop-done {
+  min-width: 140px;
+}
+
+.shop-screen .shop-feedback {
+  margin-bottom: 0;
+}
+
+.shop-group {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: var(--panel-alt);
+}
+
+.shop-group h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.shop-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.shop-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.shop-tile {
+  position: relative;
+  width: 104px;
+  aspect-ratio: 1;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  justify-items: center;
   align-items: center;
-  justify-content: center;
-  min-width: 52px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(126, 224, 173, 0.12);
-  border: 1px solid rgba(126, 224, 173, 0.34);
-  font-size: 0.72rem;
+  gap: 2px;
+  padding: 8px 4px;
+  border-radius: 18px;
+  border: 2px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.shop-tile:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: rgba(255,255,255,0.3);
+}
+
+.shop-tile.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(126, 224, 173, 0.35);
+}
+
+/* The tile matching the HUD's next goal. */
+.shop-tile.goal {
+  border-color: var(--highlight);
+  box-shadow: 0 0 0 2px rgba(255, 227, 138, 0.3);
+}
+
+.shop-tile.unaffordable,
+.shop-button.unaffordable {
+  opacity: 0.5;
+}
+
+.shop-tile:disabled {
+  cursor: default;
+  background: rgba(255,255,255,0.02);
+}
+
+.shop-tile-icon {
+  font-size: 2.1rem;
+  line-height: 1;
+}
+
+.shop-tile-name {
+  font-size: 0.85rem;
   font-weight: 700;
 }
 
-.shop-actions {
+.shop-tile-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.shop-tile.owned .shop-tile-meta {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.shop-tile-badge {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 0.85rem;
+}
+
+.shop-crop-actions {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+  gap: 10px;
+}
+
+.shop-crop-summary {
+  flex: 1 1 260px;
 }
 
 .shop-button {
@@ -577,11 +693,6 @@ h1, h2 {
   background: rgba(255, 140, 122, 0.12);
 }
 
-.shop-footer {
-  margin-top: 12px;
-  color: var(--muted);
-  font-size: 0.8rem;
-}
 
 @keyframes shopFeedbackPop {
   0% {

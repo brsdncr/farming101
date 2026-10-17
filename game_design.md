@@ -304,19 +304,19 @@ Game endings are evaluated on the main screen, after the sale summary has been c
 
 ## 8. Shop
 
-Opens after each market visit (or skipped season).
+Opens after each market visit (or skipped season) as a full screen with groups of square tiles (emoji, name, and price or status). The player's coins are shown at the top; **Done** closes the Shop and starts the next season with a fresh hand.
 
-* **Contracts:** Accept up to 2 of the new offers (see §6.5).
+* **🌱 Crops:** One tile per crop, ordered by unlock price.
 
-* **Farm Upgrades:** Unlock the Hold slot (1,500; see §3.2).
+  * **Locked crops** show 🔒 and their unlock price; clicking unlocks the crop (and selects it).
 
-* **Emergency Harvest:** Restock the single charge (2% of coins, at least 50).
+  * **Unlocked crops** show their level; clicking selects the crop. The selected crop's actions appear below the tiles: **Buy 10 seeds** (seed pack price) and **Upgrade** to the next level (price and the new yield multiplier, see §4.2), or "Max level".
 
-* **Markets:** Unlock Town (2,000) and City (25,000).
+* **🏡 Farm & Markets:** Tiles for the **Hold slot** (1,500; see §3.2), the **Town** (2,000) and **City** (25,000) markets, and the **Emergency** restock (2% of coins, at least 50). Bought items show Owned / Open, and Emergency shows Ready while a charge is held.
 
-* **Crops:** Unlock locked crops, buy seed packs of unlocked crops (10 seeds per pack), and upgrade seed levels.
+* **📜 Contracts:** Accept up to 2 of the new offers (see §6.5); active contracts are listed with their visits left.
 
-* Closing the Shop draws a fresh hand from the current seed stock.
+* **Feedback:** Tiles the player can't afford are dimmed but still clickable, and clicking explains why nothing happened ("Not enough coins for that yet."). The tile matching the HUD's next goal is highlighted.
 
 ## 9. Main Menu & Saving
 

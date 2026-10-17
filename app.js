@@ -75,6 +75,7 @@ const state = createInitialGameState();
 const uiState = {
   screen: 'game',
   confirmNewGame: false,
+  shopCrop: null,
 };
 const dragState = {
   active: false,
@@ -1770,58 +1771,167 @@ function describeVisits(count) {
   return `${count} visit${count === 1 ? '' : 's'}`;
 }
 
-function renderContractsShopRow() {
-  const { active, offers } = state.contracts;
-  const isFull = active.length >= CONTRACT_MAX_ACTIVE;
+// ---------- Seed shop ----------
+
+// The crop whose seed and upgrade actions the shop shows. UI-only, not saved.
+function getShopCrop() {
+  const selected = uiState.shopCrop;
+  if (selected && getCropSeedLevel(selected) > 0) {
+    return selected;
+  }
+  return CROP_KEYS.find((crop) => getCropSeedLevel(crop) > 0) ?? CROP_KEYS[0];
+}
+
+// A square shop button: emoji, name and a short status or price line.
+function renderShopTile({ icon, name, meta, action, data = '', classes = [], title = '', badge = '', disabled = false }) {
+  return `
+    <button
+      type="button"
+      class="shop-tile ${classes.filter(Boolean).join(' ')}"
+      ${action ? `data-shop-action="${action}"` : ''}
+      ${data}
+      ${title ? `title="${title}"` : ''}
+      ${disabled ? 'disabled' : ''}
+    >
+      ${badge ? `<span class="shop-tile-badge" aria-hidden="true">${badge}</span>` : ''}
+      <span class="shop-tile-icon" aria-hidden="true">${icon}</span>
+      <span class="shop-tile-name">${name}</span>
+      <span class="shop-tile-meta">${meta}</span>
+    </button>
+  `;
+}
+
+function renderCropTiles(goalLabel) {
+  const selected = getShopCrop();
+  // Cheapest unlock first, so the row reads as the crop progression.
+  const crops = [...CROP_KEYS].sort((a, b) => getUnlockCost(a) - getUnlockCost(b));
+
+  return crops.map((crop) => {
+    const config = getCropSeedConfig(crop);
+    const level = getCropSeedLevel(crop);
+    if (level > 0) {
+      return renderShopTile({
+        icon: CROP_EMOJIS[crop],
+        name: config.label,
+        meta: `Lv ${level}`,
+        action: 'select-crop',
+        data: `data-shop-crop="${crop}"`,
+        classes: [crop === selected && 'selected'],
+        title: `${config.label}: seeds and upgrades`,
+      });
+    }
+
+    const cost = getUnlockCost(crop);
+    return renderShopTile({
+      icon: CROP_EMOJIS[crop],
+      name: config.label,
+      meta: `Unlock · ${cost.toLocaleString('en-US')}`,
+      action: 'unlock-crop',
+      data: `data-shop-crop="${crop}"`,
+      classes: ['locked', state.coins < cost && 'unaffordable', goalLabel === config.label && 'goal'],
+      title: `Unlock ${config.label} for ${cost.toLocaleString('en-US')} coins`,
+      badge: '🔒',
+    });
+  }).join('');
+}
+
+// Seed and upgrade actions for the selected crop (a square tile has no room for two actions).
+function renderCropActions() {
+  const crop = getShopCrop();
+  const level = getCropSeedLevel(crop);
+  if (level === 0) {
+    return '';
+  }
+
+  const config = getCropSeedConfig(crop);
+  const packCost = getCropSeedPrice(crop);
+  const upgradeCost = getUpgradeCost(crop);
+  const multiplier = (value) => Number(value.toFixed(2));
 
   return `
-    <div class="shop-row">
-      <div class="shop-row-header">
-        <div class="sale-row-label">
-          <span aria-hidden="true">📜</span>
-          <span>Contracts</span>
-        </div>
-        <span class="shop-level-tag">${active.length}/${CONTRACT_MAX_ACTIVE}</span>
-      </div>
-      ${active.map((contract) => `
-        <div class="contract-line">${describeContract(contract)} · ${describeVisits(getContractVisitsLeft(contract))} left</div>
-      `).join('')}
-      ${offers.length ? offers.map((offer) => `
-        <div class="contract-offer">
-          <span>${describeContract(offer)} · within ${describeVisits(offer.visits)}</span>
-          <button
-            type="button"
-            class="shop-button secondary"
-            data-shop-action="accept-contract"
-            data-contract-id="${offer.id}"
-            ${isFull ? 'disabled title="You already have the maximum number of contracts"' : ''}
-          >
-            Accept
-          </button>
-        </div>
-      `).join('') : '<p class="contract-empty">New offers arrive after your next market visit.</p>'}
+    <div class="shop-crop-actions">
+      <span class="shop-crop-summary">
+        ${CROP_EMOJIS[crop]} <strong>${config.label}</strong> · Lv ${level} · 🌱 ${state.inventory[crop] ?? 0} seeds · yield ×${multiplier(getSeedLevelMultiplier(crop))}
+      </span>
+      <button type="button" class="shop-button ${state.coins < packCost ? 'unaffordable' : ''}" data-shop-action="buy-seed" data-shop-crop="${crop}">
+        🌱 Buy ${getCropSeedPackSize(crop)} seeds · ${packCost.toLocaleString('en-US')}
+      </button>
+      ${upgradeCost !== null ? `
+        <button type="button" class="shop-button secondary ${state.coins < upgradeCost ? 'unaffordable' : ''}" data-shop-action="upgrade-crop" data-shop-crop="${crop}">
+          ⬆ Upgrade to Lv ${level + 1} · ${upgradeCost.toLocaleString('en-US')} · yield ×${multiplier(getSeedLevelMultiplier(crop) + SEED_LEVEL_YIELD_BONUS)}
+        </button>
+      ` : '<span class="shop-maxed">Max level</span>'}
     </div>
   `;
 }
 
-function renderFarmUpgradeRows() {
+const MARKET_ICONS = { town: '🏘️', city: '🏙️' };
+
+function renderFarmTiles(goalLabel) {
+  const holdTile = state.upgrades.hold
+    ? renderShopTile({ icon: '📥', name: 'Hold slot', meta: 'Owned', classes: ['owned'], disabled: true })
+    : renderShopTile({
+      icon: '📥',
+      name: 'Hold slot',
+      meta: `Unlock · ${HOLD_SLOT_COST.toLocaleString('en-US')}`,
+      action: 'buy-hold',
+      classes: [state.coins < HOLD_SLOT_COST && 'unaffordable', goalLabel === 'Hold slot' && 'goal'],
+      title: 'A third hand card to park a block for later',
+    });
+
+  const marketTiles = Object.entries(MARKET_LOCATIONS)
+    .filter(([, location]) => location.unlockCost > 0)
+    .map(([locationKey, location]) => (isMarketUnlocked(locationKey)
+      ? renderShopTile({ icon: MARKET_ICONS[locationKey] ?? '🏪', name: location.label, meta: 'Open', classes: ['owned'], disabled: true })
+      : renderShopTile({
+        icon: MARKET_ICONS[locationKey] ?? '🏪',
+        name: location.label,
+        meta: `Unlock · ${location.unlockCost.toLocaleString('en-US')}`,
+        action: 'unlock-market',
+        data: `data-shop-market="${locationKey}"`,
+        classes: [state.coins < location.unlockCost && 'unaffordable', goalLabel === `${location.label} market` && 'goal'],
+        title: `Unlock the ${location.label} market`,
+      })))
+    .join('');
+
+  const restockCost = getEmergencyRestockCost();
+  const emergencyTile = state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES
+    ? renderShopTile({ icon: '🚨', name: 'Emergency', meta: 'Ready', classes: ['owned'], disabled: true })
+    : renderShopTile({
+      icon: '🚨',
+      name: 'Emergency',
+      meta: `Restock · ${restockCost.toLocaleString('en-US')}`,
+      action: 'restock-emergency',
+      classes: [state.coins < restockCost && 'unaffordable'],
+      title: `Costs ${Math.round(EMERGENCY_HARVEST_COST_SHARE * 100)}% of your coins (at least ${EMERGENCY_HARVEST_COST})`,
+    });
+
+  return holdTile + marketTiles + emergencyTile;
+}
+
+function renderContractsGroup() {
+  const { active, offers } = state.contracts;
+  const isFull = active.length >= CONTRACT_MAX_ACTIVE;
+
   return `
-    <div class="shop-row">
-      <div class="shop-row-header">
-        <div class="sale-row-label">
-          <span aria-hidden="true">📥</span>
-          <span>Hold slot</span>
-        </div>
-        <span class="shop-level-tag">${state.upgrades.hold ? 'Owned' : 'Locked'}</span>
+    <h3>📜 Contracts (${active.length}/${CONTRACT_MAX_ACTIVE})</h3>
+    ${offers.length ? offers.map((offer) => `
+      <div class="contract-offer">
+        <span>${describeContract(offer)} · within ${describeVisits(offer.visits)}</span>
+        <button
+          type="button"
+          class="shop-button secondary ${isFull ? 'unaffordable' : ''}"
+          data-shop-action="accept-contract"
+          data-contract-id="${offer.id}"
+          ${isFull ? 'title="You already have the maximum number of contracts"' : ''}
+        >
+          Accept
+        </button>
       </div>
-      <div class="shop-actions">
-        ${state.upgrades.hold ? '<span class="shop-maxed">Unlocked: park a block in the Hold card</span>' : `
-          <button type="button" class="shop-button secondary" data-shop-action="buy-hold" ${state.coins < HOLD_SLOT_COST ? 'disabled' : ''}>
-            Unlock (${HOLD_SLOT_COST.toLocaleString('en-US')})
-          </button>
-        `}
-      </div>
-    </div>
+    `).join('') : '<p class="contract-empty">New offers arrive after your next market visit.</p>'}
+    ${active.map((contract) => `
+      <div class="contract-line">Active: ${describeContract(contract)} · ${describeVisits(getContractVisitsLeft(contract))} left</div>
+    `).join('')}
   `;
 }
 
@@ -1830,134 +1940,31 @@ function renderShopPanel() {
     return '';
   }
 
+  const goalLabel = getNextGoal().label;
+
   return `
-    <div class="market-modal-backdrop open">
-      <div class="market-modal-panel shop-panel" role="dialog" aria-modal="true">
-        <div class="market-header">
-          <h2>Seed Shop</h2>
-          <button type="button" id="shop-close" class="close-button">×</button>
-        </div>
+    <div class="shop-screen" role="dialog" aria-modal="true" aria-label="Seed shop">
+      <div class="shop-screen-panel">
+        <header class="shop-header">
+          <h2>🛒 Seed Shop</h2>
+          <span class="shop-coins">💰 ${state.coins.toLocaleString('en-US')}</span>
+          <button type="button" id="shop-close" class="sell-button shop-done">Done ▶</button>
+        </header>
 
-        ${state.shopFeedback ? `
-          <div class="shop-feedback ${state.shopFeedback.kind}">
-            ${state.shopFeedback.message}
-          </div>
-        ` : ''}
+        ${state.shopFeedback ? `<div class="shop-feedback ${state.shopFeedback.kind}">${state.shopFeedback.message}</div>` : ''}
 
-        <div class="shop-list" data-shop-list>
-          ${renderContractsShopRow()}
+        <section class="shop-group">
+          <h3>🌱 Crops</h3>
+          <div class="shop-tiles">${renderCropTiles(goalLabel)}</div>
+          ${renderCropActions()}
+        </section>
 
-          <div class="shop-row">
-            <div class="shop-row-header">
-              <div class="sale-row-label">
-                <span aria-hidden="true">🚨</span>
-                <span>Emergency harvest</span>
-              </div>
-              <span class="shop-level-tag">${state.emergencyHarvests}/${EMERGENCY_HARVEST_MAX_CHARGES}</span>
-            </div>
-
-            <div class="shop-actions">
-              <button
-                type="button"
-                class="shop-button"
-                data-shop-action="restock-emergency"
-                ${state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES || state.coins < getEmergencyRestockCost() ? 'disabled' : ''}
-                title="Costs ${Math.round(EMERGENCY_HARVEST_COST_SHARE * 100)}% of your coins (at least ${EMERGENCY_HARVEST_COST})"
-              >
-                ${state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES ? 'Ready' : `Restock (${getEmergencyRestockCost().toLocaleString('en-US')})`}
-              </button>
-            </div>
-          </div>
-
-          ${Object.entries(MARKET_LOCATIONS).filter(([, location]) => location.unlockCost > 0).map(([locationKey, location]) => `
-            <div class="shop-row">
-              <div class="shop-row-header">
-                <div class="sale-row-label">
-                  <span aria-hidden="true">🏪</span>
-                  <span>${location.label} market</span>
-                </div>
-                <span class="shop-level-tag">${isMarketUnlocked(locationKey) ? 'Open' : 'Locked'}</span>
-              </div>
-
-              <div class="shop-actions">
-                ${isMarketUnlocked(locationKey) ? '<span class="shop-maxed">Unlocked</span>' : `
-                  <button
-                    type="button"
-                    class="shop-button secondary"
-                    data-shop-action="unlock-market"
-                    data-shop-market="${locationKey}"
-                    ${state.coins < location.unlockCost ? 'disabled' : ''}
-                  >
-                    Unlock (${location.unlockCost})
-                  </button>
-                `}
-              </div>
-            </div>
-          `).join('')}
-
-          ${renderFarmUpgradeRows()}
-
-          ${CROP_KEYS.map((cropKey) => {
-            const config = getCropSeedConfig(cropKey);
-            const currentLevel = getCropSeedLevel(cropKey);
-            const unlocked = currentLevel > 0;
-            const nextUpgradeCost = getUpgradeCost(cropKey);
-            const seedPackCost = getCropSeedPrice(cropKey);
-            const seedPackSize = getCropSeedPackSize(cropKey);
-            const canAffordSeed = state.coins >= seedPackCost;
-            const canAffordUnlock = state.coins >= (config.unlockCost ?? 0);
-            const canAffordUpgrade = nextUpgradeCost !== null && state.coins >= nextUpgradeCost;
-
-            return `
-              <div class="shop-row">
-                <div class="shop-row-header">
-                  <div class="sale-row-label">
-                    <span class="sale-swatch" style="background:${CROP_COLORS[cropKey]};"></span>
-                    <span>${config.label}</span>
-                  </div>
-                  <span class="shop-level-tag">Lv ${currentLevel || 0}</span>
-                </div>
-
-                <div class="shop-actions">
-                  <button
-                    type="button"
-                    class="shop-button"
-                    data-shop-action="buy-seed"
-                    data-shop-crop="${cropKey}"
-                    ${!unlocked || !canAffordSeed ? 'disabled' : ''}
-                  >
-                    Buy ${seedPackSize}x (${seedPackCost})
-                  </button>
-
-                  ${unlocked ? (nextUpgradeCost !== null ? `
-                    <button
-                      type="button"
-                      class="shop-button secondary"
-                      data-shop-action="upgrade-crop"
-                      data-shop-crop="${cropKey}"
-                      ${!canAffordUpgrade ? 'disabled' : ''}
-                    >
-                      Upgrade (${nextUpgradeCost}) · yield ×${Number((getSeedLevelMultiplier(cropKey) + SEED_LEVEL_YIELD_BONUS).toFixed(2))}
-                    </button>
-                  ` : '<span class="shop-maxed">Max level</span>') : `
-                    <button
-                      type="button"
-                      class="shop-button secondary"
-                      data-shop-action="unlock-crop"
-                      data-shop-crop="${cropKey}"
-                      ${!canAffordUnlock ? 'disabled' : ''}
-                    >
-                      Unlock (${config.unlockCost ?? 0})
-                    </button>
-                  `}
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-
-        <div class="shop-footer">
-          <span>Coins: ${state.coins}</span>
+        <div class="shop-columns">
+          <section class="shop-group">
+            <h3>🏡 Farm &amp; Markets</h3>
+            <div class="shop-tiles">${renderFarmTiles(goalLabel)}</div>
+          </section>
+          <section class="shop-group">${renderContractsGroup()}</section>
         </div>
       </div>
     </div>
@@ -2268,7 +2275,7 @@ function render() {
   }
 
   if (state.shopOpen) {
-    const activeShopPanel = document.querySelector('.shop-panel');
+    const activeShopPanel = document.querySelector('.shop-screen-panel');
     if (activeShopPanel) {
       state.shopScrollTop = activeShopPanel.scrollTop;
     }
@@ -2355,7 +2362,7 @@ function render() {
 
   if (state.shopOpen) {
     requestAnimationFrame(() => {
-      const shopPanel = document.querySelector('.shop-panel');
+      const shopPanel = document.querySelector('.shop-screen-panel');
       if (shopPanel) {
         shopPanel.scrollTop = state.shopScrollTop ?? 0;
       }
@@ -2465,34 +2472,35 @@ function bindInteractions() {
       const cropKey = shopAction.dataset.shopCrop;
       const action = shopAction.dataset.shopAction;
 
-      if (action === 'buy-seed') {
-        buySeedPack(cropKey);
+      if (action === 'select-crop') {
+        uiState.shopCrop = cropKey;
+        render();
         return;
       }
 
-      if (action === 'unlock-crop') {
-        unlockCrop(cropKey);
+      if (action === 'unlock-crop' && unlockCrop(cropKey)) {
+        uiState.shopCrop = cropKey;
+        render();
         return;
-      }
-
-      if (action === 'upgrade-crop') {
-        upgradeCrop(cropKey);
-      }
-
-      if (action === 'restock-emergency') {
-        restockEmergencyHarvest();
-      }
-
-      if (action === 'unlock-market') {
-        unlockMarket(shopAction.dataset.shopMarket);
       }
 
       if (action === 'accept-contract') {
-        acceptContract(Number(shopAction.dataset.contractId));
+        if (!acceptContract(Number(shopAction.dataset.contractId))) {
+          setShopFeedback(`You can have at most ${CONTRACT_MAX_ACTIVE} contracts at a time.`, 'error');
+        }
+        return;
       }
 
-      if (action === 'buy-hold') {
-        buyHoldSlot();
+      const purchases = {
+        'buy-seed': () => buySeedPack(cropKey),
+        'upgrade-crop': () => upgradeCrop(cropKey),
+        'restock-emergency': restockEmergencyHarvest,
+        'unlock-market': () => unlockMarket(shopAction.dataset.shopMarket),
+        'buy-hold': buyHoldSlot,
+      };
+      // Unaffordable tiles stay clickable (just dimmed), so say why nothing happened.
+      if (action === 'unlock-crop' || (purchases[action] && !purchases[action]())) {
+        setShopFeedback('Not enough coins for that yet.', 'error');
       }
       return;
     }
