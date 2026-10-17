@@ -50,9 +50,9 @@ A cozy, cartoon-style tile-placement and farming economy strategy game. Players 
 
 * **Hold Slot (upgrade, 1,500 coins in the Shop):** Adds a third card, **Hold**, after Next.
 
-  * With an empty hold, **📥 Hold current** parks the Current block there; Next becomes Current and a new Next is drawn.
+  * With an empty hold, the **📥** button (Hold current) in the card's corner parks the Current block there; Next becomes Current and a new Next is drawn.
 
-  * With a block held, **⇄ Swap with current** trades the Current and held blocks. The held block can't be placed directly; swap it back first.
+  * With a block held, the **⇄** button (Swap with current) trades the Current and held blocks. The held block can't be placed directly; swap it back first.
 
   * Seeds shown in the held block are reserved like the other cards. The hold empties when a new season starts (its seeds stay in stock).
 
@@ -70,7 +70,7 @@ Standard 4-block polyominoes (7 types):
 
   * **Rotation:** Mouse wheel scroll or touchpad up/down gesture over the Current card (or while dragging). Over the hand or field, the wheel never scrolls the page.
 
-* **Layout:** The farm screen (top bar, field, hand and sidebar) always fits the window without scrolling (from 1280×720 up); the field grows with the window height.
+* **Layout:** The farm screen (top bar, field, hand and sidebar) always fits the window without scrolling (from 1280×720 up); the field grows with the window height, and hand blocks are about 75% of a field tile.
 
 ### 3.4 Seed Stock & Tetromino Filling
 

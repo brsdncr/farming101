@@ -1653,9 +1653,13 @@ function renderHoldCard() {
     <div class="tetromino-card hold-card" data-slot-index="hold">
       <div class="shape-name">Hold</div>
       <div class="mini-grid">${renderMiniBlock(held)}</div>
-      <button id="hand-hold-button" type="button" class="shop-button secondary hold-button" title="${held ? 'Swap the current block with the held one' : 'Park the current block for later'}">
-        ${held ? '⇄ Swap with current' : '📥 Hold current'}
-      </button>
+      <button
+        id="hand-hold-button"
+        type="button"
+        class="swap-button hold-button"
+        title="${held ? 'Swap with current: trade the current block with the held one' : 'Hold current: park the current block for later'}"
+        aria-label="${held ? 'Swap with current' : 'Hold current'}"
+      >${held ? '⇄' : '📥'}</button>
     </div>
   `;
 }

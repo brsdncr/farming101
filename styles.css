@@ -7,6 +7,10 @@
 }
 
 :root {
+  /* Field size: grows with the window height, leaving room for the top bar and the hand, so the
+     farm screen never needs to scroll. Hand blocks are sized from it (see .mini-grid). */
+  --board-size: clamp(240px, calc((100vh - 265px) / 1.5), 520px);
+
   /* Ink and text */
   --ink: #3a2414;          /* outlines and the strongest text */
   --text: #4a2f1a;         /* body text on cream */
@@ -246,9 +250,7 @@ h1 {
   display: grid;
   grid-template-columns: repeat(6, minmax(36px, 1fr));
   gap: 6px;
-  /* The board grows with the window height, leaving room for the top bar and hand, so the farm
-     screen never needs to scroll. */
-  width: min(100%, clamp(240px, calc(100vh - 432px), 520px));
+  width: min(100%, var(--board-size));
   margin: 0 auto;
   padding: 14px;
   border-radius: 26px;
@@ -1305,6 +1307,7 @@ h1 {
 
 /* Hand cards are wooden trays, as in the prototype. */
 .tetromino-card {
+  position: relative;
   background:
     repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.05) 0 2px, transparent 2px 26px),
     linear-gradient(180deg, #a76d33, var(--wood-dark));
@@ -1534,10 +1537,14 @@ h1 {
   cursor: default;
 }
 
+/* Small round action in the Hold card's corner, so the card is no taller than the others. */
 .hold-button {
-  display: block;
-  margin: 8px auto 0;
-  font-size: 0.85rem;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 34px;
+  height: 34px;
+  font-size: 1rem;
 }
 
 .tetromino-card.next-card {
@@ -1570,8 +1577,8 @@ h1 {
   grid-template-rows: repeat(8, 1fr);
   aspect-ratio: 1;
   gap: 3px;
-  /* Small cards keep the whole farm screen inside the window. */
-  max-width: 112px;
+  /* Hand cells come out at about 75% of a field tile at every window size. */
+  max-width: calc(var(--board-size) * 0.5 - 24px);
   margin: 0 auto;
 }
 
@@ -1591,8 +1598,14 @@ h1 {
   box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.15);
 }
 
+/* Hand cells change size with the window, so the emoji is sized from the cell itself
+   (72% of its height) to stay centered and uncropped. */
+.slot-cell {
+  container-type: size;
+}
+
 .slot-cell .crop-emoji {
-  font-size: clamp(1.45rem, 2.8vw, 2.1rem);
+  font-size: 72cqh;
 }
 
 .drag-ghost {
