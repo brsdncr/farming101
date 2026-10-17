@@ -18,8 +18,8 @@ test('inventory displays each crop level', () => {
 
   app.render();
 
-  assert.match(appElement.innerHTML, /Level: 3/);
-  assert.match(appElement.innerHTML, /Level: 0/);
+  assert.match(appElement.innerHTML, /Lv 3</);
+  assert.match(appElement.innerHTML, /Lv 0</);
 });
 
 test('market settlement pays revenue once, keeps seeds unchanged, and clears all harvested crops', () => {
@@ -71,7 +71,7 @@ test('groups of five or more are auto-harvested with the level bonus; smaller gr
 
   app.autoHarvest();
 
-  // tomato: 5 tiles + level 3 bonus (2)
+  // tomato: 5 tiles × 1.3 (level 3) = 6.5, rounded
   assert.equal(app.state.cropInventory.tomato, 7);
   assert.equal(app.state.cropInventory.carrot, 0);
   assert.ok(app.state.grid[0].every((cell) => cell === null));
@@ -116,6 +116,18 @@ test('emergency harvest is restocked in the shop for coins, holding at most one'
   app.state.coins = 49;
   assert.equal(app.restockEmergencyHarvest(), false);
   assert.equal(app.state.emergencyHarvests, 0);
+});
+
+test('emergency restock costs the larger of 50 coins or 2% of coins', () => {
+  Object.assign(app.state, app.createInitialGameState());
+
+  assert.equal(app.getEmergencyRestockCost(1_000), 50);
+  assert.equal(app.getEmergencyRestockCost(100_000), 2_000);
+
+  app.state.emergencyHarvests = 0;
+  app.state.coins = 100_000;
+  assert.equal(app.restockEmergencyHarvest(), true);
+  assert.equal(app.state.coins, 98_000);
 });
 
 test('hand slots never show more seeds than the inventory holds', () => {
