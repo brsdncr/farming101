@@ -1559,7 +1559,6 @@ function renderBoard() {
       const crop = state.grid[row][col];
       const previewCell = state.dragPreview && state.dragPreview.tetromino.cells.find((cell) => row === state.dragPreview.row + cell.row && col === state.dragPreview.col + cell.col);
       const isPreview = !!previewCell;
-      const soilColor = '#3c2d22';
       const isValidPreview = isPreview && state.dragPreview.valid;
       const isInvalidPreview = isPreview && !state.dragPreview.valid;
       const cellClass = [
@@ -1583,7 +1582,7 @@ function renderBoard() {
           class="${cellClass}"
           data-row="${row}"
           data-col="${col}"
-          style="background:${soilColor}; opacity:${isPreview ? 0.8 : 1}; border-color:${isInvalidPreview ? '#ff8c7a' : 'var(--tile-border)'};"
+          style="opacity:${isPreview ? 0.8 : 1};"
           title="${crop || previewCell?.cropType || 'Empty'}"
           type="button"
         >
@@ -1641,7 +1640,7 @@ function renderMiniBlock(tetromino) {
   return cellsOf.map((cell) => `
     <div
       class="slot-cell filled"
-      style="grid-row:${rowOffset + cell.row * 2 + 1} / span 2; grid-column:${colOffset + cell.col * 2 + 1} / span 2; background:#3c2d22; border-color:rgba(255,255,255,0.08);"
+      style="grid-row:${rowOffset + cell.row * 2 + 1} / span 2; grid-column:${colOffset + cell.col * 2 + 1} / span 2;"
     >
       ${cell.cropType ? renderCropPixelArt(cell.cropType, 1) : ''}
     </div>

@@ -2,11 +2,11 @@
 
 ## 1. Overview & Vision
 
-A pixel-art tile-placement and farming economy strategy game. Players plant crop-filled tetrominoes on a small farm grid, grow connected groups of the same crop that harvest automatically, and sell the harvest in markets of increasing size. Profits buy new crops, seed upgrades and access to bigger markets.
+A cozy, cartoon-style tile-placement and farming economy strategy game. Players plant crop-filled tetrominoes on a small farm grid, grow connected groups of the same crop that harvest automatically, and sell the harvest in markets of increasing size. Profits buy new crops, seed upgrades and access to bigger markets.
 
 * **Goal:** Become a millionaire (1,000,000 coins) as young as possible. The player starts at age 20 and dies at age 85.
 
-* **Visual Style:** 100% Pixel Art (all sprites, icons, tiles, UI components, and typography must adhere to pixel art aesthetics).
+* **Visual Style:** Cozy cartoon farm (see §12): a sunny farm scene, a wooden board with cream cells, chunky cream buttons with brown outlines, and bold rounded lettering with a dark outline.
 
 * **Language:** English.
 
@@ -417,12 +417,14 @@ Planned to occur automatically on a regular cycle. Examples:
 
 * **Tests:** `npm test` runs the Node test suite in `tests/`.
 
-* **Pixel Art Standard:**
+* **Visual Style: Cozy Cartoon** (based on the Cropfall prototype art):
 
-  * Uniform pixel scale/aspect ratio.
+  * **Palette:** Defined once as CSS variables in `styles.css`: cream surfaces (`#fff3cf`, `#fadeb4`, `#eac690`), wood (`#de9e4e`, `#eabf79`, `#965f29`, outline `#915521`), empty field cells `#fee0b1`, soil under crops `#8c5735`, sky `#c9ebf2`, grass greens (`#c8d95e`, `#b0c85b`, leaf `#9dbf3d`), and tomato red `#e8413c` for warnings. Colors are not hardcoded in `app.js`.
 
-  * Custom retro font or pixel-perfect text rendering.
+  * **Typography:** Fredoka (bundled in `fonts/`, so it also works offline in the desktop app). Titles, button labels and big HUD values use white lettering with a thick dark-brown outline; body text is dark brown on cream.
 
-  * No high-resolution vector assets or smooth gradients.
+  * **Shapes:** Chunky pill and square buttons with a brown outline, a light outer rim and a soft drop; panels are cream with the same outline. The field sits in a wooden frame, planted cells show dark soil, and hand cards are wooden trays.
 
-  * *Current status:* The UI still uses emoji crop icons and CSS gradients (including the Emergency button). A pixel-art pass is still needed.
+  * **Scene:** A CSS-drawn sky with clouds and rolling green hills behind everything; overlays (market, shop, menus) use a light cream tint with a soft blur so the scene stays sunny.
+
+  * *Current status:* Crops are still emoji, and the background is drawn in CSS. Dedicated crop icons (transparent PNGs, about 256×256) and a background illustration from the prototype can replace them later.
