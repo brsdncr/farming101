@@ -274,7 +274,27 @@ Opens after each market visit (or skipped season).
 
 * Closing the Shop draws a fresh hand from the current seed stock.
 
-## 9. Balance
+## 9. Main Menu & Saving
+
+* **Main Menu:** Shown when the game starts.
+
+  * **Continue** (only when a save exists), with a summary of the saved run: age, season, coins and round.
+
+  * **New Game.** When a save exists, it asks for a second click before replacing it.
+
+  * The **best result**, e.g. "Best: millionaire at age 33", or the highest fortune if the player has never won.
+
+* **Menu Button (☰):** In the top bar; saves and returns to the main menu. Not available during a sale.
+
+* **Autosave:** Progress is saved after every change (placements, harvests, purchases, prices, season changes). Only game progress is stored; open panels and drag state are not.
+
+* **Sales Can't Be Re-Rolled:** The sale result is saved when selling starts. Quitting during the sale animation and continuing shows that sale's summary instead of running a new one.
+
+* **End of a Run:** When a game ends (win, death or bankruptcy), the save is cleared and the best result is updated. The end screen offers **Play again** and **Main menu**.
+
+* **Storage:** Saves live in the browser's local storage, so each browser (and the desktop app) has its own save. The desktop app serves the game on a fixed local port (47101) so its save survives restarts; if that port is busy, it falls back to a random port and saves from other launches are not visible.
+
+## 10. Balance
 
 The economy is tuned with a headless simulation that plays whole careers with the real game code: hand and swap, placement, auto-harvest, Emergency, market, shop and calendar.
 
@@ -299,9 +319,9 @@ The economy is tuned with a headless simulation that plays whole careers with th
 
 * The bot looks only one move ahead, so it still harvests mostly at exactly 5 tiles; the size bonus mainly raises the ceiling for players who plan bigger groups.
 
-## 10. Planned & Open Items
+## 11. Planned & Open Items
 
-### 10.1 Random Events (Not Implemented)
+### 11.1 Random Events (Not Implemented)
 
 Planned to occur automatically on a regular cycle. Examples:
 
@@ -311,7 +331,7 @@ Planned to occur automatically on a regular cycle. Examples:
 
 * **Fad / Trend:** High demand for specific seasonal items in specific locations.
 
-### 10.2 Open Design Questions
+### 11.2 Open Design Questions
 
 * **Emergency harvest is nearly free late in the game.** The simulation uses it on almost every visit because 50 coins is negligible once income is in the thousands. Options: scale its price with income, raise it, or add a cooldown.
 
@@ -319,7 +339,7 @@ Planned to occur automatically on a regular cycle. Examples:
 
 * **Game length.** If a shorter game is wanted, make each visit richer rather than reducing the number of visits.
 
-## 11. Technical & Architectural Guidelines
+## 12. Technical & Architectural Guidelines
 
 * **Code Layout:**
 
@@ -335,11 +355,15 @@ Planned to occur automatically on a regular cycle. Examples:
 
   * `src/state/inventoryState.js` — seed and harvest stock helpers.
 
+  * `src/state/saveState.js` — save/load: serializing progress, restoring older saves with defaults, and safe localStorage access.
+
+  * `electron/main.js` — the desktop app; serves the game on a fixed local port so saves persist.
+
   * `scripts/balance.mjs` — the balance simulation.
 
   * `src/main.js`, `src/state/gameState.js`, `src/state/handState.js` and `src/state/marketState.js` are older, unused prototypes that do not reflect the current rules.
 
-* **State Management:** A single mutable `state` object in `app.js`; rule functions update it and call `render()`.
+* **State Management:** A single mutable `state` object in `app.js`; rule functions update it and call `render()`, which also autosaves. Screen choice (main menu or game) lives in a separate `uiState` that is not saved.
 
 * **Tests:** `npm test` runs the Node test suite in `tests/`.
 

@@ -4,14 +4,30 @@ import { createAppServer } from '../server.js';
 let appServer;
 let appUrl;
 
-function listen(server) {
+// Saved games live in localStorage, which is tied to the page origin (including the port),
+// so the desktop app uses a fixed port to keep saves across launches.
+const PREFERRED_PORT = 47101;
+
+function listenOn(server, port) {
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(port, '127.0.0.1', () => {
       server.removeListener('error', reject);
       resolve(server.address().port);
     });
   });
+}
+
+async function listen(server) {
+  try {
+    return await listenOn(server, PREFERRED_PORT);
+  } catch (error) {
+    if (error.code !== 'EADDRINUSE') {
+      throw error;
+    }
+    console.warn(`Port ${PREFERRED_PORT} is busy; using a random port. Saved games from other launches won't be visible.`);
+    return listenOn(server, 0);
+  }
 }
 
 async function createMainWindow() {

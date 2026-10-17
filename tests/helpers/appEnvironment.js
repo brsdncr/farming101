@@ -59,6 +59,18 @@ globalThis.document = {
 // render() restores the shop's scroll position on the next frame.
 globalThis.requestAnimationFrame = (callback) => setTimeout(callback, 0);
 
+// In-memory stand-in for the browser's localStorage, used by the save system.
+const storedItems = new Map();
+globalThis.localStorage = {
+  getItem: (key) => (storedItems.has(key) ? storedItems.get(key) : null),
+  setItem: (key, value) => storedItems.set(key, String(value)),
+  removeItem: (key) => storedItems.delete(key),
+  clear: () => storedItems.clear(),
+};
+
 const app = await import('../../app.js');
+
+// The app boots into the main menu; most tests exercise the farm screen.
+app.uiState.screen = 'game';
 
 export { app, appElement };

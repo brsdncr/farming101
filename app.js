@@ -45,6 +45,15 @@ import {
   getInventoryTotal,
   weightedRandomCrop,
 } from './src/state/inventoryState.js';
+import {
+  BEST_KEY,
+  SAVE_KEY,
+  readStored,
+  removeStored,
+  restoreGame,
+  serializeGame,
+  writeStored,
+} from './src/state/saveState.js';
 
 // The hand holds the block being played plus a preview of the next one.
 const CURRENT_SLOT = 0;
@@ -54,6 +63,11 @@ const HAND_SIZE = 2;
 const HARVEST_FLASH_MS = 900;
 
 const state = createInitialGameState();
+// Which top-level screen is shown. Not part of the saved game.
+const uiState = {
+  screen: 'game',
+  confirmNewGame: false,
+};
 const dragState = {
   active: false,
   slotIndex: null,
@@ -912,14 +926,80 @@ function checkForGameOver() {
   state.marketOpen = false;
   state.shopOpen = false;
   state.market.simulating = false;
+  recordGameEnd();
   return true;
 }
 
-function resetGameState() {
-  Object.assign(state, createInitialGameState());
-  if (typeof window !== 'undefined' && window.location && typeof window.location.reload === 'function') {
-    window.location.reload();
+function resetDragState() {
+  dragState.active = false;
+  dragState.slotIndex = null;
+  dragState.preview = null;
+  dragState.pointer = null;
+  dragState.overBoard = false;
+}
+
+// Autosave: called from render, so every committed change is stored. Finished games aren't saved.
+function saveGame() {
+  if (state.gameOver) {
+    return;
   }
+
+  writeStored(SAVE_KEY, serializeGame(state));
+}
+
+// A finished run clears the save and may set a new best result.
+function recordGameEnd() {
+  removeStored(SAVE_KEY);
+  const best = readStored(BEST_KEY) ?? {};
+  if (state.gameResult === 'won' && (best.millionaireAge == null || state.age < best.millionaireAge)) {
+    best.millionaireAge = state.age;
+  }
+  best.highestCoins = Math.max(best.highestCoins ?? 0, state.coins);
+  writeStored(BEST_KEY, best);
+}
+
+function startNewGame() {
+  removeStored(SAVE_KEY);
+  Object.assign(state, createInitialGameState());
+  resetDragState();
+  uiState.screen = 'game';
+  uiState.confirmNewGame = false;
+  render();
+}
+
+function continueGame() {
+  const restored = restoreGame(readStored(SAVE_KEY), createInitialGameState());
+  if (!restored) {
+    startNewGame();
+    return;
+  }
+
+  Object.assign(state, restored);
+  resetDragState();
+  uiState.screen = 'game';
+  uiState.confirmNewGame = false;
+
+  // The sale result was fixed when selling started; settle it now instead of letting a reload re-roll it.
+  if (state.market.simulating && state.market.activeSimulation) {
+    state.market.saleScreenOpen = true;
+    finalizeMarketSimulation(MARKET_LOCATIONS[state.market.location], state.market.activeSimulation);
+    return;
+  }
+
+  render();
+}
+
+function openMainMenu() {
+  if (state.market.simulating) {
+    return;
+  }
+
+  saveGame();
+  resetDragState();
+  state.dragPreview = null;
+  uiState.screen = 'menu';
+  uiState.confirmNewGame = false;
+  render();
 }
 
 function clearBoardForReturn() {
@@ -1693,6 +1773,40 @@ function renderMarketPanel() {
   `;
 }
 
+function describeBestResult(best) {
+  if (best?.millionaireAge != null) {
+    return `Best: millionaire at age ${best.millionaireAge}`;
+  }
+  if (best?.highestCoins) {
+    return `Best fortune: ${best.highestCoins.toLocaleString('en-US')} coins`;
+  }
+  return '';
+}
+
+function renderMainMenu() {
+  const save = restoreGame(readStored(SAVE_KEY), createInitialGameState());
+  const bestText = describeBestResult(readStored(BEST_KEY));
+  const newGameLabel = save && uiState.confirmNewGame ? 'Replace your saved farm? Click again' : 'New Game';
+
+  return `
+    <div class="sale-screen menu-screen">
+      <div class="sale-screen-panel game-over-panel">
+        <div class="game-over-body">
+          <div class="game-over-badge">🌾</div>
+          <h2 class="game-over-title">Farming 101</h2>
+          <p class="game-over-message">Grow crops, sell them, and become a millionaire before you turn ${DEATH_AGE}.</p>
+          ${save ? `
+            <button id="menu-continue" type="button" class="sell-button game-over-button">Continue</button>
+            <p class="menu-save-summary">Age ${save.age} · ${save.season} · ${save.coins.toLocaleString('en-US')} coins · Round ${save.round}</p>
+          ` : ''}
+          <button id="menu-new-game" type="button" class="${save ? 'shop-button secondary' : 'sell-button'} game-over-button">${newGameLabel}</button>
+          ${bestText ? `<p class="menu-best">${bestText}</p>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 const GAME_ENDINGS = {
   won: { badge: '🏆', title: 'Millionaire!', button: 'Play again' },
   died: { badge: '🪦', title: 'Game Over', button: 'Retry' },
@@ -1717,6 +1831,7 @@ function renderGameOverScreen() {
           <h3 class="game-over-title">${ending.title}</h3>
           <p class="game-over-message">${state.gameOverReason}</p>
           <button id="game-over-retry" type="button" class="sell-button game-over-button">${ending.button}</button>
+          <button id="game-over-menu" type="button" class="shop-button secondary game-over-button">Main menu</button>
         </div>
       </div>
     </div>
@@ -1843,6 +1958,11 @@ function render() {
     return;
   }
 
+  if (uiState.screen === 'menu') {
+    app.innerHTML = renderMainMenu();
+    return;
+  }
+
   if (state.gameOver) {
     app.innerHTML = renderGameOverScreen();
     return;
@@ -1851,6 +1971,11 @@ function render() {
   if (checkForGameOver()) {
     app.innerHTML = renderGameOverScreen();
     return;
+  }
+
+  // Mid-drag renders happen on every pointer move and change nothing worth saving.
+  if (!dragState.active) {
+    saveGame();
   }
 
   if (state.shopOpen) {
@@ -1877,6 +2002,7 @@ function render() {
           <div class="stat"><span>Season</span><strong>${state.season}</strong></div>
           <div class="stat"><span>Age</span><strong>${state.age}</strong></div>
           <div class="stat" title="Reach ${GOAL_COINS.toLocaleString('en-US')} coins before age ${DEATH_AGE}"><span>Coins / Goal</span><strong>${state.coins.toLocaleString('en-US')} / 1M</strong></div>
+          <button id="menu-button" type="button" class="swap-button menu-button" title="Save and return to the main menu" aria-label="Main menu">☰</button>
         </div>
       </header>
 
@@ -1942,9 +2068,35 @@ function bindInteractions() {
   }
 
   app.addEventListener('click', (event) => {
-    const retryButton = event.target.closest('#game-over-retry');
-    if (retryButton) {
-      resetGameState();
+    if (event.target.closest('#game-over-retry')) {
+      startNewGame();
+      return;
+    }
+
+    if (event.target.closest('#game-over-menu')) {
+      uiState.screen = 'menu';
+      render();
+      return;
+    }
+
+    if (event.target.closest('#menu-continue')) {
+      continueGame();
+      return;
+    }
+
+    if (event.target.closest('#menu-new-game')) {
+      // Replacing a saved farm takes a second click.
+      if (readStored(SAVE_KEY) && !uiState.confirmNewGame) {
+        uiState.confirmNewGame = true;
+        render();
+        return;
+      }
+      startNewGame();
+      return;
+    }
+
+    if (event.target.closest('#menu-button')) {
+      openMainMenu();
       return;
     }
 
@@ -2173,6 +2325,7 @@ export {
   buildMarketCustomerSimulation,
   buySeedPack,
   checkForGameOver,
+  continueGame,
   createHandState,
   createInitialGameState,
   createMarketState,
@@ -2184,19 +2337,23 @@ export {
   getMarketLocationProfile,
   getUpgradeCost,
   getVarietyCount,
+  openMainMenu,
   render,
   restockEmergencyHarvest,
   skipSeason,
+  startNewGame,
   startNextSeason,
   startSelling,
   state,
   swapHandBlocks,
+  uiState,
   unlockCrop,
   unlockMarket,
   upgradeCrop,
 };
 
 if (typeof document !== 'undefined' && document.getElementById('app')) {
+  uiState.screen = 'menu';
   render();
   bindInteractions();
 }
