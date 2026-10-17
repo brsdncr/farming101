@@ -2,6 +2,12 @@ import {
   AUTO_HARVEST_MIN_GROUP_SIZE,
   COMBO_MAX_MULTIPLIER,
   COMBO_STEP_BONUS,
+  CONTRACT_DEADLINE_VISITS,
+  CONTRACT_MAX_ACTIVE,
+  CONTRACT_MIN_QUANTITY,
+  CONTRACT_OFFER_COUNT,
+  CONTRACT_QUANTITY_SHARE,
+  CONTRACT_REWARD_MULTIPLIER,
   CROP_BASE_PRICES,
   CROP_COLORS,
   CROP_EMOJIS,
@@ -684,8 +690,14 @@ function finalizeMarketSimulation(profile, simulation) {
         : `${crop}: ${brought} spoiled`;
     });
 
+  const contracts = simulation.contracts ?? [];
+  const contractRewards = contracts.reduce((sum, contract) => sum + contract.reward, 0);
+  summaries.unshift(...contracts.map((contract) => `contract ${contract.quantity} ${contract.crop}: +${contract.reward}`));
+
   state.cropInventory = createCropInventoryState();
-  state.coins += totalRevenue;
+  state.coins += totalRevenue + contractRewards;
+  state.lastHarvestUnits = simulation.unitsBrought ?? state.lastHarvestUnits;
+  state.lastHarvestCrops = simulation.harvestedCrops ?? state.lastHarvestCrops;
   advanceTime();
   state.market.simulating = false;
   state.market.saleComplete = true;
@@ -695,12 +707,13 @@ function finalizeMarketSimulation(profile, simulation) {
     totalRequested: simulation.totalRequested,
     totalSold: simulation.totalSold,
     totalRevenue: simulation.totalRevenue,
+    contracts,
   };
   state.market.skipAnimation = false;
   state.market.skipAnimationEnabledAt = 0;
   state.market.activeSimulation = null;
   state.market.activeSelectedCrops = [];
-  state.market.lastSummary = `Selling in ${profile.label}: ${summaries.join(' • ')}. Total revenue: ${totalRevenue} coins.`;
+  state.market.lastSummary = `Selling in ${profile.label}: ${summaries.join(' • ')}. Total revenue: ${totalRevenue + contractRewards} coins.`;
   render();
 }
 
@@ -737,6 +750,7 @@ function startNextSeason() {
   state.market.activeSelectedCrops = [];
   state.market.skipAnimationEnabledAt = 0;
   state.shopOpen = true;
+  generateContractOffers();
 }
 
 // Way out when no unlocked market accepts the harvest: time passes and the harvest is lost.
@@ -752,6 +766,105 @@ function skipSeason() {
   render();
 }
 
+// ---------- Contracts ----------
+
+// Crop/market pairs a contract can ask for: crops the player has unlocked, at open markets that buy them.
+// Offers favour crops harvested at the last market visit, so a contract never pushes a new crop type
+// into the seed mix (which would clog the field for many seasons).
+function getContractTargets() {
+  const targets = Object.keys(MARKET_LOCATIONS)
+    .filter(isMarketUnlocked)
+    .flatMap((locationKey) => getMarketProductPool(locationKey)
+      .filter((crop) => getCropSeedLevel(crop) > 0)
+      .map((crop) => ({ crop, locationKey })));
+  const grown = targets.filter(({ crop }) => state.lastHarvestCrops.includes(crop));
+  return grown.length > 0 ? grown : targets;
+}
+
+function getContractQuantity() {
+  const scaled = Math.round((state.lastHarvestUnits * CONTRACT_QUANTITY_SHARE) / 5) * 5;
+  return Math.max(CONTRACT_MIN_QUANTITY, scaled);
+}
+
+// Replaces the open offers. Offers never duplicate an active contract's crop and market.
+function generateContractOffers(random = Math.random) {
+  const taken = new Set(state.contracts.active.map((contract) => `${contract.crop}@${contract.locationKey}`));
+  const targets = getContractTargets().filter(({ crop, locationKey }) => !taken.has(`${crop}@${locationKey}`));
+  const offers = [];
+
+  while (offers.length < CONTRACT_OFFER_COUNT && targets.length > 0) {
+    const { crop, locationKey } = targets.splice(Math.floor(random() * targets.length), 1)[0];
+    const quantity = getContractQuantity();
+    offers.push({
+      id: state.contracts.nextId,
+      crop,
+      locationKey,
+      quantity,
+      reward: Math.round(quantity * CROP_BASE_PRICES[crop] * CONTRACT_REWARD_MULTIPLIER),
+      visits: randomMarketCount(CONTRACT_DEADLINE_VISITS.min, CONTRACT_DEADLINE_VISITS.max, random),
+    });
+    state.contracts.nextId += 1;
+  }
+
+  state.contracts.offers = offers;
+}
+
+function acceptContract(contractId) {
+  const offer = state.contracts.offers.find((contract) => contract.id === contractId);
+  if (!offer || state.contracts.active.length >= CONTRACT_MAX_ACTIVE) {
+    return false;
+  }
+
+  state.contracts.offers = state.contracts.offers.filter((contract) => contract !== offer);
+  // Deliverable at this visit and the following ones, `visits` in total.
+  state.contracts.active.push({ ...offer, lastRound: state.round + offer.visits - 1 });
+  state.shopFeedback = { message: `Contract accepted: ${offer.quantity} ${offer.crop} to ${MARKET_LOCATIONS[offer.locationKey].label}`, kind: 'success' };
+  render();
+  return true;
+}
+
+function getContractVisitsLeft(contract) {
+  return contract.lastRound - state.round + 1;
+}
+
+function expireContracts() {
+  state.contracts.active = state.contracts.active.filter((contract) => getContractVisitsLeft(contract) > 0);
+}
+
+// Sets aside the units for every active contract this market can fill right now (all at once, never partly).
+// Rewards are paid when the sale is settled, together with the sale revenue.
+function deliverContracts(locationKey) {
+  const delivered = [];
+
+  for (const contract of state.contracts.active) {
+    if (contract.locationKey === locationKey && (state.cropInventory[contract.crop] ?? 0) >= contract.quantity) {
+      state.cropInventory[contract.crop] -= contract.quantity;
+      delivered.push(contract);
+    }
+  }
+
+  state.contracts.active = state.contracts.active.filter((contract) => !delivered.includes(contract));
+  return delivered;
+}
+
+// Builds the sale for the current market: contract units are set aside first, then the rest is
+// offered to customers. The result is fixed here; settling it later only applies it.
+function createSale(profile) {
+  const unitsBrought = Object.values(state.cropInventory).reduce((sum, quantity) => sum + quantity, 0);
+  const harvestedCrops = CROP_KEYS.filter((crop) => (state.cropInventory[crop] ?? 0) > 0);
+  const contracts = deliverContracts(state.market.location);
+  const selectedCrops = getMarketProductPool(state.market.location)
+    .filter((crop) => (state.cropInventory[crop] ?? 0) > 0);
+
+  return {
+    ...buildMarketCustomerSimulation(profile, selectedCrops),
+    contracts,
+    unitsBrought,
+    harvestedCrops,
+    selectedCrops,
+  };
+}
+
 function startSelling() {
   const profile = getMarketLocationProfile();
   const blocker = getSellingBlocker();
@@ -762,9 +875,8 @@ function startSelling() {
     return;
   }
 
-  const selectedCrops = getMarketProductPool(state.market.location)
-    .filter((crop) => (state.cropInventory[crop] ?? 0) > 0);
-  const simulation = buildMarketCustomerSimulation(profile, selectedCrops);
+  const simulation = createSale(profile);
+  const selectedCrops = simulation.selectedCrops;
 
   state.marketOpen = false;
   state.market.saleScreenOpen = true;
@@ -851,6 +963,9 @@ function createInitialGameState() {
     gameResult: null,
     emergencyHarvests: EMERGENCY_HARVEST_MAX_CHARGES,
     combo: 0,
+    contracts: { offers: [], active: [], nextId: 1 },
+    lastHarvestUnits: 0,
+    lastHarvestCrops: [],
     harvestFeedback: '',
     harvestFlash: null,
   };
@@ -867,6 +982,7 @@ function getCalendar(visitsCompleted) {
 function advanceTime() {
   state.round += 1;
   Object.assign(state, getCalendar(state.round - 1));
+  expireContracts();
 }
 
 // The next thing worth saving for: the cheapest locked market, or the cheapest locked crop that an
@@ -1591,6 +1707,48 @@ function renderDragGhost() {
   `;
 }
 
+function describeContract(contract) {
+  return `${CROP_EMOJIS[contract.crop] ?? '🌱'} ${contract.quantity} ${contract.crop} → ${MARKET_LOCATIONS[contract.locationKey].label} · +${contract.reward.toLocaleString('en-US')}`;
+}
+
+function describeVisits(count) {
+  return `${count} visit${count === 1 ? '' : 's'}`;
+}
+
+function renderContractsShopRow() {
+  const { active, offers } = state.contracts;
+  const isFull = active.length >= CONTRACT_MAX_ACTIVE;
+
+  return `
+    <div class="shop-row">
+      <div class="shop-row-header">
+        <div class="sale-row-label">
+          <span aria-hidden="true">📜</span>
+          <span>Contracts</span>
+        </div>
+        <span class="shop-level-tag">${active.length}/${CONTRACT_MAX_ACTIVE}</span>
+      </div>
+      ${active.map((contract) => `
+        <div class="contract-line">${describeContract(contract)} · ${describeVisits(getContractVisitsLeft(contract))} left</div>
+      `).join('')}
+      ${offers.length ? offers.map((offer) => `
+        <div class="contract-offer">
+          <span>${describeContract(offer)} · within ${describeVisits(offer.visits)}</span>
+          <button
+            type="button"
+            class="shop-button secondary"
+            data-shop-action="accept-contract"
+            data-contract-id="${offer.id}"
+            ${isFull ? 'disabled title="You already have the maximum number of contracts"' : ''}
+          >
+            Accept
+          </button>
+        </div>
+      `).join('') : '<p class="contract-empty">New offers arrive after your next market visit.</p>'}
+    </div>
+  `;
+}
+
 function renderShopPanel() {
   if (!state.shopOpen) {
     return '';
@@ -1611,6 +1769,8 @@ function renderShopPanel() {
         ` : ''}
 
         <div class="shop-list" data-shop-list>
+          ${renderContractsShopRow()}
+
           <div class="shop-row">
             <div class="shop-row-header">
               <div class="sale-row-label">
@@ -1800,6 +1960,12 @@ function renderMarketPanel() {
 
           <div class="market-meta">
             <span>Variety: ${variety}/${profile.minVariety} crop types with ${MIN_UNITS_FOR_VARIETY}+ units</span>
+            ${state.contracts.active
+              .filter((contract) => contract.locationKey === state.market.location)
+              .map((contract) => {
+                const missing = contract.quantity - (state.cropInventory[contract.crop] ?? 0);
+                return `<span class="contract-line ${missing <= 0 ? 'ready' : ''}">📜 Contract ${describeContract(contract)} · ${missing <= 0 ? 'delivered when you start selling' : `need ${missing} more`}</span>`;
+              }).join('')}
             <span>Traffic: ${profile.trafficMin}-${profile.trafficMax}</span>
             <span>All harvested crops are sold here; leftovers spoil.</span>
           </div>
@@ -1983,6 +2149,7 @@ function renderSaleSimulationScreen() {
                 </div>
               `).join('')}
               <p class="market-summary">${report.totalCustomers} customers visited the ${profile.label} market; ${report.totalRequested} wanted a crop you brought.</p>
+              ${report.contracts?.length ? `<p class="market-summary contract-line ready">📜 Contracts delivered: ${report.contracts.map(describeContract).join(' · ')}</p>` : ''}
             </div>
             <button type="button" id="sale-screen-continue" class="sell-button">Continue</button>
           ` : ''}
@@ -2082,6 +2249,21 @@ function render() {
               </li>
             `).join('')}
           </ul>
+
+          ${state.contracts.active.length ? `
+            <div class="contracts-panel">
+              <h3>Contracts</h3>
+              ${state.contracts.active.map((contract) => {
+                const have = state.cropInventory[contract.crop] ?? 0;
+                return `
+                  <div class="contract-line ${have >= contract.quantity ? 'ready' : ''}">
+                    ${describeContract(contract)}<br>
+                    <small>Harvested ${Math.min(have, contract.quantity)}/${contract.quantity} · ${describeVisits(getContractVisitsLeft(contract))} left</small>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          ` : ''}
 
           <button id="market-toggle" type="button" class="market-toggle">
             ${state.marketOpen ? 'Hide Marketplace' : 'Marketplace'}
@@ -2221,6 +2403,10 @@ function bindInteractions() {
 
       if (action === 'unlock-market') {
         unlockMarket(shopAction.dataset.shopMarket);
+      }
+
+      if (action === 'accept-contract') {
+        acceptContract(Number(shopAction.dataset.contractId));
       }
       return;
     }
@@ -2364,6 +2550,7 @@ function bindInteractions() {
 }
 
 export {
+  acceptContract,
   advanceHand,
   advanceTime,
   autoHarvest,
@@ -2374,8 +2561,10 @@ export {
   createHandState,
   createInitialGameState,
   createMarketState,
+  createSale,
   emergencyHarvest,
   finalizeMarketSimulation,
+  generateContractOffers,
   getBuyChance,
   getCalendar,
   getEmergencyRestockCost,

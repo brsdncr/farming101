@@ -1206,6 +1206,44 @@ h1, h2 {
   }
 }
 
+/* Contracts: shop offers, sidebar progress and market hints. */
+.contract-line,
+.contract-offer {
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.contract-line.ready {
+  color: var(--accent);
+}
+
+.contract-offer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.contract-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.contracts-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.contracts-panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
 .swap-button {
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.12);

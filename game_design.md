@@ -238,6 +238,32 @@ After the sale, a summary shows revenue per crop and a funnel for the player's s
 
 * Gaps in the funnel point to the fix: Wanted ≫ Served means the crop sold out (raise prices or grow more); Served ≫ Sold means the price was too high.
 
+### 6.5 Contracts
+
+Short goals between unlocks: deliver a quantity of one crop to one market within a few visits for a guaranteed reward.
+
+* **Offers:** After each market visit the Shop offers **2 contracts**. Each asks for one crop the player has unlocked, at an open market that buys it.
+
+  * Offers favour crops harvested at the last market visit, so a contract never pushes a new crop type into the seed mix (which would clog the field for many seasons). With no history yet, any unlocked crop can be asked for.
+
+  * Offers never repeat the crop and market of an active contract. Offers not accepted are replaced at the next visit.
+
+* **Quantity:** 30% of the units brought to the last market visit, rounded to 5, at least 10. Contracts grow with the farm.
+
+* **Deadline:** 2–4 market visits, counting the next one.
+
+* **Reward:** $\text{Quantity} \times \text{Base Price} \times 1.5$, rounded, e.g. 10 Tomato → 165 coins.
+
+* **Accepting:** Click Accept in the Shop. At most **2 contracts** can be active.
+
+* **Delivery:** When selling at the contract's market with at least the full quantity of the crop, those units are set aside before customers arrive (all at once, never partly). The reward is paid together with the sale revenue. Delivered units don't count against customer demand.
+
+* **Expiry:** A contract not delivered by its last visit expires with no penalty.
+
+* **Where contracts are shown:** a Contracts panel in the sidebar (progress with the current harvest and visits left), the Marketplace panel for the selected market ("delivered when you start selling" or "need N more"), the Shop, and the sale report ("Contracts delivered").
+
+* **Saving:** Delivered contracts are recorded with the sale result when selling starts, so quitting mid-sale can't pay a reward twice or lose it.
+
 ## 7. Time, Goal & Game Endings
 
 ### 7.1 Calendar & Age
@@ -269,6 +295,8 @@ Game endings are evaluated on the main screen, after the sale summary has been c
 ## 8. Shop
 
 Opens after each market visit (or skipped season).
+
+* **Contracts:** Accept up to 2 of the new offers (see §6.5).
 
 * **Emergency Harvest:** Restock the single charge (2% of coins, at least 50).
 
@@ -304,7 +332,7 @@ The economy is tuned with a headless simulation that plays whole careers with th
 
 * **Run:** `npm run balance -- [tilesPerVisit] [runs]` (defaults: 100 tiles, 10 careers).
 
-* **Bot Player:** Picks the placement and rotation that best grows groups or completes them (valuing completed groups by their real yield, so bigger groups score higher), swaps when Next is better, prices each crop to maximise expected revenue, unlocks crops and markets while keeping a seed reserve, upgrades only when supply falls short of demand, and restocks the Emergency harvest.
+* **Bot Player:** Picks the placement and rotation that best grows groups or completes them (valuing completed groups by their real yield, so bigger groups score higher), swaps when Next is better, prices each crop to maximise expected revenue, unlocks crops and markets while keeping a seed reserve, upgrades only when supply falls short of demand, restocks the Emergency harvest, and accepts contracts for its target market when they ask for a crop it already grows (planting extra for them).
 
 * **Effort** (crop tiles planted per visit) is the key input: with auto-harvest, the field size does not cap output.
 
@@ -312,10 +340,12 @@ The economy is tuned with a headless simulation that plays whole careers with th
 
 | Tiles per Visit | 40 | 60 | 100 | 160 |
 | ----- | ----- | ----- | ----- | ----- |
-| **Reached 1,000,000** | 1/40 | 40/40 | 40/40 | 39/40 |
-| **Median Age at 1,000,000** | 84 | 62 | 55 | 54 |
+| **Reached 1,000,000** | 0/40 | 39/40 | 40/40 | 40/40 |
+| **Median Age at 1,000,000** | — | 65 | 54 | 54 |
 
-* Town is typically unlocked around age 22 and City around age 26–29.
+* Town is typically unlocked around age 21 and City around age 24–27.
+
+* The bot delivers about 0.7–1 contract per visit. Contract rewards (1.5× base price) were tuned to keep the engaged player near age 55; at 2× the engaged player became a millionaire around age 50.
 
 * Returns diminish above roughly 75 tiles per visit, because the field clogs faster than groups clear. Emergency is the main way to clear a clogged field; with its price at 2% of coins the bot uses it on about 60% of visits.
 

@@ -80,6 +80,15 @@ export const MIN_UNITS_FOR_VARIETY = 3;
 export const MARKET_BASE_BUY_RATE = 0.7;
 export const MARKET_PRICE_SENSITIVITY = 4;
 
+// Contracts: deliver a quantity of one crop to one market within a few visits for a bonus.
+// The quantity scales with the player's last harvest so contracts stay reachable as the farm grows.
+export const CONTRACT_OFFER_COUNT = 2;
+export const CONTRACT_MAX_ACTIVE = 2;
+export const CONTRACT_REWARD_MULTIPLIER = 1.5; // reward per unit = base price × this
+export const CONTRACT_DEADLINE_VISITS = { min: 2, max: 4 };
+export const CONTRACT_QUANTITY_SHARE = 0.3; // share of the units brought to the last market visit
+export const CONTRACT_MIN_QUANTITY = 10;
+
 // Connected same-crop groups of this size or larger are harvested automatically after placement.
 export const AUTO_HARVEST_MIN_GROUP_SIZE = 5;
 

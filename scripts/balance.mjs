@@ -219,7 +219,10 @@ function visitMarket(stats) {
   const plans = options.map((locationKey) => {
     const crops = Object.keys(MARKET_DEMAND_WEIGHTS[locationKey]).filter((crop) => state.cropInventory[crop] > 0);
     const prices = Object.fromEntries(crops.map((crop) => [crop, bestPrice(locationKey, crop, state.cropInventory[crop])]));
-    const expected = Object.values(prices).reduce((sum, plan) => sum + plan.revenue, 0);
+    const contractRewards = state.contracts.active
+      .filter((contract) => contract.locationKey === locationKey && state.cropInventory[contract.crop] >= contract.quantity)
+      .reduce((sum, contract) => sum + contract.reward, 0);
+    const expected = Object.values(prices).reduce((sum, plan) => sum + plan.revenue, 0) + contractRewards;
     return { locationKey, crops, prices, expected };
   });
   const plan = plans.sort((a, b) => b.expected - a.expected)[0];
@@ -229,8 +232,9 @@ function visitMarket(stats) {
   }
   state.market.location = plan.locationKey;
   const profile = MARKET_LOCATIONS[plan.locationKey];
-  const simulation = app.buildMarketCustomerSimulation(profile, plan.crops);
   stats.unitsHarvested += Object.values(state.cropInventory).reduce((sum, value) => sum + value, 0);
+  const simulation = app.createSale(profile);
+  stats.contractsDelivered += simulation.contracts.length;
   stats.unitsSold += simulation.totalSold;
   state.market.simulating = true;
   state.market.saleScreenOpen = true;
@@ -289,6 +293,12 @@ function planSeeds(locationKey) {
     tilesByCrop[crop] = share;
     tilesLeft -= share;
   });
+  // Contracts for this market need their quantity on top of what customers buy.
+  for (const contract of state.contracts.active.filter((active) => active.locationKey === locationKey)) {
+    const tiles = Math.ceil((contract.quantity / unitsPerTile(contract.crop)) * 1.3);
+    tilesByCrop[contract.crop] = (tilesByCrop[contract.crop] ?? 0) + tiles;
+    tilesLeft -= tiles;
+  }
   for (const crop of crops) {
     const extra = Math.max(0, Math.min(tilesLeft, demandTiles(locationKey, crop) - (tilesByCrop[crop] ?? 0)));
     tilesByCrop[crop] = (tilesByCrop[crop] ?? 0) + extra;
@@ -329,6 +339,16 @@ function shop(stats) {
     }
   }
 
+  // Only take contracts for crops it already grows for that market: a new crop type would mix into
+  // every block and clog the field for many seasons.
+  const grownCrops = new Set(Object.keys(planSeeds(targetMarket())).filter((crop) => planSeeds(targetMarket())[crop] > 0));
+  for (const offer of [...state.contracts.offers]) {
+    if (offer.locationKey === targetMarket() && grownCrops.has(offer.crop) && state.contracts.active.length < 2) {
+      app.acceptContract(offer.id);
+      stats.contractsAccepted += 1;
+    }
+  }
+
   // Upgrade a crop only while the planned planting can't meet demand: extra yield beyond demand spoils.
   const market = targetMarket();
   let tilesByCrop = planSeeds(market);
@@ -366,7 +386,7 @@ function playCareer(seed) {
   Math.random = seededRandom(seed);
   Object.assign(state, app.createInitialGameState());
   const stats = {
-    visits: 0, tilesPlanted: 0, unitsHarvested: 0, unitsSold: 0, emergencies: 0, skipped: 0,
+    visits: 0, tilesPlanted: 0, unitsHarvested: 0, unitsSold: 0, emergencies: 0, skipped: 0, contractsAccepted: 0, contractsDelivered: 0,
     marketUnlockVisit: {}, coinsAtVisit: [],
   };
 
@@ -419,6 +439,9 @@ const totals = results.reduce((sum, result) => ({
   visits: sum.visits + result.visits,
   emergencies: sum.emergencies + result.emergencies,
   skipped: sum.skipped + result.skipped,
-}), { tiles: 0, harvested: 0, sold: 0, visits: 0, emergencies: 0, skipped: 0 });
+  accepted: sum.accepted + result.contractsAccepted,
+  delivered: sum.delivered + result.contractsDelivered,
+}), { tiles: 0, harvested: 0, sold: 0, visits: 0, emergencies: 0, skipped: 0, accepted: 0, delivered: 0 });
 console.log(`  Per visit: ${(totals.tiles / totals.visits).toFixed(0)} tiles planted, ${(totals.harvested / totals.visits).toFixed(0)} units harvested, `
   + `${(totals.sold / totals.visits).toFixed(0)} sold · emergencies per visit ${(totals.emergencies / totals.visits).toFixed(2)} · skipped seasons ${totals.skipped}`);
+console.log(`  Contracts: ${totals.delivered}/${totals.accepted} delivered (${(totals.delivered / totals.visits).toFixed(2)} per visit)`);
