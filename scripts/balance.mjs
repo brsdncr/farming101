@@ -7,6 +7,7 @@
 import { app } from '../tests/helpers/appEnvironment.js';
 import {
   AUTO_HARVEST_MIN_GROUP_SIZE,
+  BARN_LEVELS,
   CROP_BASE_PRICES,
   CROP_KEYS,
   CROP_SEED_CONFIG,
@@ -18,6 +19,8 @@ import { canPlaceShape } from '../src/state/gridState.js';
 
 const TILES_PER_VISIT = Number(process.argv[2] ?? 100);
 const RUNS = Number(process.argv[3] ?? 10);
+// Set BALANCE_NO_BARN=1 to measure careers that never use the barn.
+globalThis.USE_BARN = process.env.BALANCE_NO_BARN !== '1';
 const MAX_VISITS = (DEATH_AGE - START_AGE) * VISITS_PER_YEAR;
 // Group size the bot assumes when estimating units harvested per tile.
 const TYPICAL_GROUP_SIZE = 6;
@@ -232,6 +235,32 @@ function visitMarket(stats) {
     state.market.prices[crop] = price;
   }
   state.market.location = plan.locationKey;
+
+  // Barn: keep what would spoil anyway (stock beyond expected sales, and crops this market doesn't
+  // buy) for the next visit, while there is room.
+  if (globalThis.USE_BARN) {
+    const spare = CROP_KEYS
+      .map((crop) => {
+        const stock = state.cropInventory[crop] ?? 0;
+        const contractNeed = state.contracts.active
+          .filter((contract) => contract.crop === crop && contract.locationKey === plan.locationKey)
+          .reduce((sum, contract) => sum + contract.quantity, 0);
+        const expectedSales = plan.crops.includes(crop)
+          ? expectedWanters(plan.locationKey, crop) * app.getBuyChance(plan.prices[crop].price, CROP_BASE_PRICES[crop])
+          : 0;
+        return { crop, units: Math.floor(stock - contractNeed - expectedSales), value: CROP_BASE_PRICES[crop] };
+      })
+      .filter((entry) => entry.units > 0)
+      .sort((a, b) => b.value - a.value);
+    for (const { crop, units } of spare) {
+      app.setKeep(crop, units);
+      // Kept crops don't count toward variety: never keep so much that the market won't open.
+      if (app.getVarietyCount(plan.locationKey) < MARKET_LOCATIONS[plan.locationKey].minVariety) {
+        app.setKeep(crop, 0);
+      }
+    }
+    stats.unitsKept += Object.values(state.market.keep).reduce((sum, units) => sum + units, 0);
+  }
   const profile = MARKET_LOCATIONS[plan.locationKey];
   stats.unitsHarvested += Object.values(state.cropInventory).reduce((sum, value) => sum + value, 0);
   const simulation = app.createSale(profile);
@@ -324,6 +353,8 @@ function shop(stats) {
       ...Object.keys(MARKET_LOCATIONS)
         .filter((locationKey) => !state.unlockedMarkets[locationKey])
         .map((locationKey) => ({ cost: MARKET_LOCATIONS[locationKey].unlockCost, buy: () => app.unlockMarket(locationKey), market: locationKey })),
+      ...(globalThis.USE_BARN ? BARN_LEVELS.slice(app.state.upgrades.barnLevel + 1, app.state.upgrades.barnLevel + 2)
+        .map((level) => ({ cost: level.cost, buy: () => app.buyBarnUpgrade() })) : []),
       ...CROP_KEYS
         .filter((crop) => !isUnlocked(crop))
         .filter((crop) => Object.keys(MARKET_LOCATIONS).some((locationKey) => state.unlockedMarkets[locationKey] && crop in MARKET_DEMAND_WEIGHTS[locationKey]))
@@ -387,7 +418,7 @@ function playCareer(seed) {
   Math.random = seededRandom(seed);
   Object.assign(state, app.createInitialGameState());
   const stats = {
-    visits: 0, tilesPlanted: 0, unitsHarvested: 0, unitsSold: 0, emergencies: 0, skipped: 0, contractsAccepted: 0, contractsDelivered: 0,
+    visits: 0, tilesPlanted: 0, unitsHarvested: 0, unitsSold: 0, emergencies: 0, skipped: 0, contractsAccepted: 0, contractsDelivered: 0, unitsKept: 0,
     marketUnlockVisit: {}, coinsAtVisit: [],
   };
 
@@ -442,8 +473,10 @@ const totals = results.reduce((sum, result) => ({
   emergencies: sum.emergencies + result.emergencies,
   skipped: sum.skipped + result.skipped,
   accepted: sum.accepted + result.contractsAccepted,
+  kept: sum.kept + result.unitsKept,
   delivered: sum.delivered + result.contractsDelivered,
-}), { tiles: 0, harvested: 0, sold: 0, visits: 0, emergencies: 0, skipped: 0, accepted: 0, delivered: 0 });
+}), { tiles: 0, harvested: 0, sold: 0, visits: 0, emergencies: 0, skipped: 0, accepted: 0, delivered: 0, kept: 0 });
 console.log(`  Per visit: ${(totals.tiles / totals.visits).toFixed(0)} tiles planted, ${(totals.harvested / totals.visits).toFixed(0)} units harvested, `
   + `${(totals.sold / totals.visits).toFixed(0)} sold · emergencies per visit ${(totals.emergencies / totals.visits).toFixed(2)} · skipped seasons ${totals.skipped}`);
 console.log(`  Contracts: ${totals.delivered}/${totals.accepted} delivered (${(totals.delivered / totals.visits).toFixed(2)} per visit)`);
+console.log(`  Barn: ${globalThis.USE_BARN ? `${(totals.kept / totals.visits).toFixed(1)} units kept per visit` : 'not used'}`);

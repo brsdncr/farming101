@@ -689,7 +689,8 @@ h1 {
 
 .shop-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* Farm & Markets has five tiles; give it room to keep them on one row. */
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 14px;
 }
 

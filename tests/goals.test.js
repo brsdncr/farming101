@@ -41,7 +41,7 @@ test('next goal is ready once affordable, and becomes the coin goal when everyth
     app.state.seedLevels[crop] = 1;
   }
   Object.keys(app.state.unlockedMarkets).forEach((key) => { app.state.unlockedMarkets[key] = true; });
-  app.state.upgrades = { hold: true };
+  app.state.upgrades = { hold: true, barnLevel: 2 };
   app.state.coins = 250_000;
 
   const goal = app.getNextGoal();

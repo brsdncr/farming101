@@ -19,7 +19,7 @@ test('the hold slot and the held block survive save and continue', () => {
   Object.assign(app.state, app.createInitialGameState());
   app.continueGame();
 
-  assert.deepEqual(app.state.upgrades, { hold: true });
+  assert.deepEqual(app.state.upgrades, { hold: true, barnLevel: 0 });
   assert.deepEqual(app.state.hand.hold, held);
 });
 

@@ -16,7 +16,7 @@ A cozy, cartoon-style tile-placement and farming economy strategy game. Players 
 
 2. **Auto-Harvest:** Any connected group of 5 or more same-crop tiles is harvested immediately, freeing its tiles. An **Emergency** button can harvest the whole field once.
 
-3. **Market:** Whenever ready, take the harvested crops to an unlocked market, set prices, and run the sales simulation. All harvested crops go to market; unsold crops spoil.
+3. **Market:** Whenever ready, take the harvested crops to an unlocked market, set prices, and run the sales simulation. Harvested crops go to market unless kept in the barn for a later visit; unsold crops spoil.
 
 4. **Shop:** After each market visit, buy seeds, unlock crops and markets, upgrade seed levels, and restock the Emergency harvest.
 
@@ -187,7 +187,7 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 
 * **Unlocking:** Town and City are unlocked with coins in the Shop. Locked markets are shown in the location list but cannot be selected.
 
-* **Minimum Variety:** A trip must bring at least the listed number of crop types the market buys, each with at least **3 harvested units**. This prevents relying on a single crop.
+* **Minimum Variety:** A trip must put on sale at least the listed number of crop types the market buys, each with at least **3 units** on sale (crops kept in the barn don't count). This prevents relying on a single crop.
 
 * **Demand Weights:** Each customer wants one crop, drawn by the market's demand weights:
 
@@ -206,7 +206,9 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 
 * **Location:** Select an unlocked market.
 
-* **Harvested Crops:** Every harvested crop is listed with its quantity. All of it goes to market; there is no quantity selection.
+* **Harvested Crops:** Every harvested crop is listed with its quantity. Everything not kept in the barn is offered for sale.
+
+* **🛖 Keep for later:** Each crop has a − / + control (steps of 5) for how many units to keep in the barn (see §6.6), including crops this market doesn't buy.
 
   * Crops the selected market does not buy are marked as spoiling.
 
@@ -234,7 +236,7 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 
 * **Pricing Strategy:** When demand exceeds stock, raising the price earns more while still selling out. When stock exceeds demand, lowering the price sells more.
 
-* **Spoil/Waste Penalty:** Unsold crops, and crops the market does not buy, spoil at the end of the visit. Harvested crops never turn back into seeds; only unplanted seeds carry over.
+* **Spoil/Waste Penalty:** Unsold crops, and crops the market does not buy, spoil at the end of the visit unless kept in the barn. Harvested crops never turn back into seeds; only unplanted seeds carry over.
 
 ### 6.4 Sale Report
 
@@ -274,6 +276,26 @@ Short goals between unlocks: deliver a quantity of one crop to one market within
 
 * **Saving:** Delivered contracts are recorded with the sale result when selling starts, so quitting mid-sale can't pay a reward twice or lose it.
 
+### 6.6 Barn
+
+Keep harvested crops for a later market visit instead of selling them now. This deliberately relaxes the original rule that all harvested crops go to market.
+
+* **Keeping:** In the Marketplace panel, set how many units of each crop to keep (− / +, steps of 5). The panel shows the barn's fill (e.g. "Barn: 18/30").
+
+* **Capacity:** 30 units to start. Upgrades in the Shop: **60** (2,500) and **120** (15,000). Barn upgrades are part of the next-goal ladder.
+
+* **At the sale:** Kept units are set aside first: they are not sold and can't fill contracts. The summary lists what was kept.
+
+* **Spoilage:** Kept crops come back as harvest at the next visit, minus **10% of each kept crop, rounded up** (at least 1 unit).
+
+* **Skipping a season** still discards the whole harvest, kept crops included.
+
+* **Variety minimum:** Counts only crops offered for sale: kept units don't count, so the barn can't be used to sell a single crop while carrying a second one along.
+
+* **Saving:** Kept crops are recorded with the sale result when selling starts, so quitting mid-sale can't duplicate or lose them.
+
+* **Balance:** The barn is close to balance-neutral (median millionaire age 65/56/55 with the barn vs 65/54/54 without, for 60/100/160 tiles per visit): the bot usually sells out, so it rarely has anything worth keeping. Its value is situational: carrying crops a market doesn't buy to the next one, saving up for a contract, or building variety for Town or City.
+
 ## 7. Time, Goal & Game Endings
 
 ### 7.1 Calendar & Age
@@ -288,7 +310,7 @@ Short goals between unlocks: deliver a quantity of one crop to one market within
 
 * **Next Goal:** The next thing worth saving for, with a progress bar: the cheapest locked market, or the cheapest locked crop that an open market buys. It reads "ready" once affordable (unlock it in the Shop after the next sale). Once everything is unlocked, it shows progress toward 1,000,000 coins.
 
-  * Farm upgrades (the Hold slot) are part of the ladder. In a typical run the order is Pumpkin → Beetroot → Hold slot → Town market → Onion → Cherry → City market → Eggplant → Watermelon → Millionaire.
+  * Farm upgrades (the Hold slot and barn sizes) are part of the ladder. Buying each goal in turn gives Pumpkin → Beetroot → Hold slot → Town market → Onion → Barn 60 → Cherry → Barn 120 → City market → Eggplant → Watermelon → Millionaire (crops only count once a market that buys them is open).
 
 ### 7.2 Endings
 
@@ -312,7 +334,7 @@ Opens after each market visit (or skipped season) as a full screen with groups o
 
   * **Unlocked crops** show their level; clicking selects the crop. The selected crop's actions appear below the tiles: **Buy 10 seeds** (seed pack price) and **Upgrade** to the next level (price and the new yield multiplier, see §4.2), or "Max level".
 
-* **🏡 Farm & Markets:** Tiles for the **Hold slot** (1,500; see §3.2), the **Town** (2,000) and **City** (25,000) markets, and the **Emergency** restock (2% of coins, at least 50). Bought items show Owned / Open, and Emergency shows Ready while a charge is held.
+* **🏡 Farm & Markets:** Tiles for the **Hold slot** (1,500; see §3.2), the **Barn** (upgrade to 60 for 2,500, then 120 for 15,000; see §6.6), the **Town** (2,000) and **City** (25,000) markets, and the **Emergency** restock (2% of coins, at least 50). Bought items show Owned / Open, and Emergency shows Ready while a charge is held.
 
 * **📜 Contracts:** Accept up to 2 of the new offers (see §6.5); active contracts are listed with their visits left.
 
@@ -386,6 +408,8 @@ Planned to occur automatically on a regular cycle. Examples:
 * **City's 4-type variety minimum is hard for light players.** Because tetrominoes mix all seed types at random, minor crops rarely form groups of 5. Options: let the player choose which seeds go into tetrominoes, lower City's minimum to 3, or relax how variety is counted.
 
 * **Bigger fields were tested and postponed.** Field upgrades (7×7, 8×8) remove most field clogging, which makes the whole economy much faster: even a single 7×7 upgrade moved the engaged player's millionaire age from ~54 to ~40, almost regardless of its price (5,000 to 100,000). Restoring age ~55 by lowering crop prices widened the gap between casual and heavy players instead. Field size is worth revisiting together with a decision on game length or the seed-bag idea. The board and drag code already read the field size from the grid, so adding sizes later is easy.
+
+* **A share-based variety rule was tested and postponed.** Requiring each counted crop to be at least 10% of what is sold (instead of 3 units) would stop token amounts of a second crop, but because blocks mix all seed types at random, minor crops are hard to grow in volume: about 40% of seasons became unsellable and engaged players rarely reached a million (5%: about 1–4 years slower, ~5 skipped seasons per career). Worth revisiting once players can control their seed mix (e.g. a seed bag).
 
 * **Game length.** If a shorter game is wanted, make each visit richer rather than reducing the number of visits.
 

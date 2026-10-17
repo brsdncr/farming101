@@ -1,5 +1,8 @@
 import {
   AUTO_HARVEST_MIN_GROUP_SIZE,
+  BARN_KEEP_STEP,
+  BARN_LEVELS,
+  BARN_SPOILAGE,
   COMBO_MAX_MULTIPLIER,
   COMBO_STEP_BONUS,
   CONTRACT_DEADLINE_VISITS,
@@ -480,6 +483,7 @@ function createMarketState(overrides = {}) {
     trafficMin: profile.trafficMin,
     trafficMax: profile.trafficMax,
     prices: { ...CROP_BASE_PRICES },
+    keep: {},
     pendingSale: [],
     lastSummary: 'No sales run yet.',
     simulating: false,
@@ -514,12 +518,18 @@ function getMarketProductPool(locationKey) {
   return Object.keys(MARKET_DEMAND_WEIGHTS[locationKey] ?? {});
 }
 
-// A crop type counts toward the variety minimum only with enough units,
-// so a single token crop can't open a market for a one-crop harvest.
-function getVarietyCount(locationKey, cropInventory = state.cropInventory) {
-  return getMarketProductPool(locationKey)
-    .filter((crop) => (cropInventory[crop] ?? 0) >= MIN_UNITS_FOR_VARIETY)
-    .length;
+// Units of each crop this market buys that would go on sale here: the harvest minus what is kept.
+function getOfferedUnits(locationKey) {
+  return Object.fromEntries(getMarketProductPool(locationKey).map((crop) => [
+    crop,
+    Math.max(0, (state.cropInventory[crop] ?? 0) - (state.market.keep[crop] ?? 0)),
+  ]));
+}
+
+// Crop types on sale here with enough units to count toward the variety minimum. Crops kept in the
+// barn don't count: the rule is about what is actually sold.
+function getVarietyCount(locationKey) {
+  return Object.values(getOfferedUnits(locationKey)).filter((units) => units >= MIN_UNITS_FOR_VARIETY).length;
 }
 
 // Share of customers who buy at this price: MARKET_BASE_BUY_RATE at the base price,
@@ -558,6 +568,54 @@ function unlockMarket(locationKey) {
 }
 
 // ---------- Farm upgrades ----------
+
+// ---------- Barn ----------
+
+function getBarnLevel() {
+  return state.upgrades.barnLevel ?? 0;
+}
+
+function getBarnCapacity() {
+  return BARN_LEVELS[getBarnLevel()].capacity;
+}
+
+function getNextBarnUpgrade() {
+  return BARN_LEVELS[getBarnLevel() + 1] ?? null;
+}
+
+function getKeptTotal() {
+  return CROP_KEYS.reduce((sum, crop) => sum + (state.market.keep[crop] ?? 0), 0);
+}
+
+// Units lost from a kept crop by the next visit: BARN_SPOILAGE, rounded up.
+function getSpoiledUnits(kept) {
+  return kept > 0 ? Math.ceil(kept * BARN_SPOILAGE) : 0;
+}
+
+// Units of a crop to keep for a later visit, limited by the harvest and the barn's free space.
+function setKeep(cropKey, quantity) {
+  const keptElsewhere = getKeptTotal() - (state.market.keep[cropKey] ?? 0);
+  const max = Math.min(state.cropInventory[cropKey] ?? 0, getBarnCapacity() - keptElsewhere);
+  state.market.keep[cropKey] = Math.max(0, Math.min(Math.floor(quantity), max));
+  render();
+}
+
+function adjustKeep(cropKey, delta) {
+  setKeep(cropKey, (state.market.keep[cropKey] ?? 0) + delta);
+}
+
+function buyBarnUpgrade() {
+  const upgrade = getNextBarnUpgrade();
+  if (!upgrade || state.coins < upgrade.cost) {
+    return false;
+  }
+
+  state.coins -= upgrade.cost;
+  state.upgrades.barnLevel = getBarnLevel() + 1;
+  state.shopFeedback = { message: `Barn expanded to ${upgrade.capacity} units`, kind: 'success' };
+  render();
+  return true;
+}
 
 function buyHoldSlot() {
   if (state.upgrades.hold || state.coins < HOLD_SLOT_COST) {
@@ -710,8 +768,14 @@ function finalizeMarketSimulation(profile, simulation) {
   const contracts = simulation.contracts ?? [];
   const contractRewards = contracts.reduce((sum, contract) => sum + contract.reward, 0);
   summaries.unshift(...contracts.map((contract) => `contract ${contract.quantity} ${contract.crop}: +${contract.reward}`));
+  const kept = simulation.kept ?? {};
+  summaries.push(...Object.entries(kept).map(([crop, units]) => `${crop}: ${units} kept in the barn (${getSpoiledUnits(units)} spoil)`));
 
   state.cropInventory = createCropInventoryState();
+  for (const [crop, units] of Object.entries(kept)) {
+    state.cropInventory[crop] = units - getSpoiledUnits(units);
+  }
+  state.market.keep = {};
   state.coins += totalRevenue + contractRewards;
   state.lastHarvestUnits = simulation.unitsBrought ?? state.lastHarvestUnits;
   state.lastHarvestCrops = simulation.harvestedCrops ?? state.lastHarvestCrops;
@@ -744,7 +808,7 @@ function getSellingBlocker() {
 
   const variety = getVarietyCount(locationKey);
   if (variety < profile.minVariety) {
-    return `${profile.label} needs ${profile.minVariety} crop types with ${MIN_UNITS_FOR_VARIETY}+ harvested units each. You have ${variety}.`;
+    return `${profile.label} needs ${profile.minVariety} crop types with ${MIN_UNITS_FOR_VARIETY}+ units each on sale (kept crops don't count). You have ${variety}.`;
   }
 
   return null;
@@ -864,11 +928,20 @@ function deliverContracts(locationKey) {
   return delivered;
 }
 
-// Builds the sale for the current market: contract units are set aside first, then the rest is
-// offered to customers. The result is fixed here; settling it later only applies it.
+// Builds the sale for the current market: crops kept for the barn and contract units are set aside
+// first, then the rest is offered to customers. The result is fixed here; settling it later only
+// applies it.
 function createSale(profile) {
   const unitsBrought = Object.values(state.cropInventory).reduce((sum, quantity) => sum + quantity, 0);
   const harvestedCrops = CROP_KEYS.filter((crop) => (state.cropInventory[crop] ?? 0) > 0);
+  const kept = {};
+  for (const crop of CROP_KEYS) {
+    const units = Math.min(state.market.keep[crop] ?? 0, state.cropInventory[crop] ?? 0);
+    if (units > 0) {
+      kept[crop] = units;
+      state.cropInventory[crop] -= units;
+    }
+  }
   const contracts = deliverContracts(state.market.location);
   const selectedCrops = getMarketProductPool(state.market.location)
     .filter((crop) => (state.cropInventory[crop] ?? 0) > 0);
@@ -876,6 +949,7 @@ function createSale(profile) {
   return {
     ...buildMarketCustomerSimulation(profile, selectedCrops),
     contracts,
+    kept,
     unitsBrought,
     harvestedCrops,
     selectedCrops,
@@ -981,7 +1055,7 @@ function createInitialGameState() {
     emergencyHarvests: EMERGENCY_HARVEST_MAX_CHARGES,
     combo: 0,
     contracts: { offers: [], active: [], nextId: 1 },
-    upgrades: { hold: false },
+    upgrades: { hold: false, barnLevel: 0 },
     lastHarvestUnits: 0,
     lastHarvestCrops: [],
     harvestFeedback: '',
@@ -1016,7 +1090,11 @@ function getNextGoal() {
     .filter((crop) => getCropSeedLevel(crop) === 0 && sellableCrops.has(crop))
     .map((crop) => ({ label: getCropSeedConfig(crop).label, cost: getUnlockCost(crop) }));
 
-  const upgrades = state.upgrades.hold ? [] : [{ label: 'Hold slot', cost: HOLD_SLOT_COST }];
+  const barnUpgrade = getNextBarnUpgrade();
+  const upgrades = [
+    ...(state.upgrades.hold ? [] : [{ label: 'Hold slot', cost: HOLD_SLOT_COST }]),
+    ...(barnUpgrade ? [{ label: `Barn ${barnUpgrade.capacity}`, cost: barnUpgrade.cost }] : []),
+  ];
 
   const next = [...lockedMarkets, ...lockedCrops, ...upgrades].sort((a, b) => a.cost - b.cost)[0]
     ?? { label: 'Millionaire', cost: GOAL_COINS };
@@ -1909,7 +1987,19 @@ function renderFarmTiles(goalLabel) {
       title: `Costs ${Math.round(EMERGENCY_HARVEST_COST_SHARE * 100)}% of your coins (at least ${EMERGENCY_HARVEST_COST})`,
     });
 
-  return holdTile + marketTiles + emergencyTile;
+  const barnUpgrade = getNextBarnUpgrade();
+  const barnTile = barnUpgrade
+    ? renderShopTile({
+      icon: '🛖',
+      name: `Barn ${getBarnCapacity()}`,
+      meta: `→ ${barnUpgrade.capacity} · ${barnUpgrade.cost.toLocaleString('en-US')}`,
+      action: 'upgrade-barn',
+      classes: [state.coins < barnUpgrade.cost && 'unaffordable', goalLabel === `Barn ${barnUpgrade.capacity}` && 'goal'],
+      title: `Keep up to ${barnUpgrade.capacity} crops for later (now ${getBarnCapacity()})`,
+    })
+    : renderShopTile({ icon: '🛖', name: `Barn ${getBarnCapacity()}`, meta: 'Max size', classes: ['owned'], disabled: true });
+
+  return holdTile + barnTile + marketTiles + emergencyTile;
 }
 
 function renderContractsGroup() {
@@ -2030,6 +2120,11 @@ function renderMarketPanel() {
                       </div>
 
                       <div class="market-crop-controls">
+                        <div class="selector-row small-inline barn-row">
+                          <button type="button" class="small-button" data-market-crop="${item}" data-market-action="keep-dec" ${state.market.simulating ? 'disabled' : ''} aria-label="Keep fewer">-</button>
+                          <span>🛖 Keep for later: <strong>${state.market.keep[item] ?? 0}</strong></span>
+                          <button type="button" class="small-button" data-market-crop="${item}" data-market-action="keep-inc" ${state.market.simulating ? 'disabled' : ''} aria-label="Keep more">+</button>
+                        </div>
                         ${soldHere ? `
                           <div class="selector-row small-inline">
                             <button type="button" class="small-button" data-market-crop="${item}" data-market-action="price-dec" ${state.market.simulating ? 'disabled' : ''}>-</button>
@@ -2037,7 +2132,7 @@ function renderMarketPanel() {
                             <button type="button" class="small-button" data-market-crop="${item}" data-market-action="price-inc" ${state.market.simulating ? 'disabled' : ''}>+</button>
                           </div>
                         ` : `
-                          <p class="empty-sale">${profile.label} customers don't buy ${item}. It will spoil.</p>
+                          <p class="empty-sale">${profile.label} customers don't buy ${item}. Any you don't keep will spoil.</p>
                         `}
                       </div>
                     </div>
@@ -2047,7 +2142,8 @@ function renderMarketPanel() {
           </div>
 
           <div class="market-meta">
-            <span>Variety: ${variety}/${profile.minVariety} crop types with ${MIN_UNITS_FOR_VARIETY}+ units</span>
+            <span title="Crops kept in the barn don't count">Variety: ${variety}/${profile.minVariety} crop types with ${MIN_UNITS_FOR_VARIETY}+ units on sale</span>
+            <span>🛖 Barn: ${getKeptTotal()}/${getBarnCapacity()} kept for next visit · ${Math.round(BARN_SPOILAGE * 100)}% of each kept crop spoils</span>
             ${state.contracts.active
               .filter((contract) => contract.locationKey === state.market.location)
               .map((contract) => {
@@ -2055,7 +2151,7 @@ function renderMarketPanel() {
                 return `<span class="contract-line ${missing <= 0 ? 'ready' : ''}">📜 Contract ${describeContract(contract)} · ${missing <= 0 ? 'delivered when you start selling' : `need ${missing} more`}</span>`;
               }).join('')}
             <span>Traffic: ${profile.trafficMin}-${profile.trafficMax}</span>
-            <span>All harvested crops are sold here; leftovers spoil.</span>
+            <span>Crops you don't keep are sold here; leftovers spoil.</span>
           </div>
 
           <button type="button" id="market-start-selling" class="sell-button" ${sellDisabled ? 'disabled' : ''}>Start Selling</button>
@@ -2500,6 +2596,7 @@ function bindInteractions() {
         'restock-emergency': restockEmergencyHarvest,
         'unlock-market': () => unlockMarket(shopAction.dataset.shopMarket),
         'buy-hold': buyHoldSlot,
+        'upgrade-barn': buyBarnUpgrade,
       };
       // Unaffordable tiles stay clickable (just dimmed), so say why nothing happened.
       if (action === 'unlock-crop' || (purchases[action] && !purchases[action]())) {
@@ -2583,6 +2680,11 @@ function bindInteractions() {
     const action = actionButton.dataset.marketAction;
     const cropKey = actionButton.dataset.marketCrop || state.market.crop;
 
+    if (action === 'keep-dec' || action === 'keep-inc') {
+      adjustKeep(cropKey, action === 'keep-inc' ? BARN_KEEP_STEP : -BARN_KEEP_STEP);
+      return;
+    }
+
     if (action === 'price-dec') {
       state.market.crop = cropKey;
       adjustMarketPrice(-1, cropKey);
@@ -2656,10 +2758,12 @@ function bindInteractions() {
 
 export {
   acceptContract,
+  adjustKeep,
   advanceHand,
   advanceTime,
   autoHarvest,
   buildMarketCustomerSimulation,
+  buyBarnUpgrade,
   buyHoldSlot,
   buySeedPack,
   checkForGameOver,
@@ -2671,6 +2775,7 @@ export {
   emergencyHarvest,
   finalizeMarketSimulation,
   generateContractOffers,
+  getBarnCapacity,
   getBuyChance,
   getCalendar,
   getEmergencyRestockCost,
@@ -2683,6 +2788,7 @@ export {
   openMainMenu,
   render,
   restockEmergencyHarvest,
+  setKeep,
   skipSeason,
   startNewGame,
   startNextSeason,

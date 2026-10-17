@@ -65,7 +65,7 @@ export const INITIAL_INVENTORY = {
 export const INITIAL_CROP_INVENTORY = Object.fromEntries(CROP_KEYS.map((crop) => [crop, 0]));
 
 // unlockCost: coins to open the market (0 = available from the start; placeholder values until balancing).
-// minVariety: how many crop types, each with at least MIN_UNITS_FOR_VARIETY units, a trip must bring.
+// minVariety: how many crop types a trip must put on sale (see MIN_UNITS_FOR_VARIETY).
 // A market's customers only buy the crops listed in its MARKET_DEMAND_WEIGHTS entry.
 export const MARKET_LOCATIONS = {
   village: { label: 'Village', unlockCost: 0, trafficMin: 50, trafficMax: 100, minVariety: 2 },
@@ -73,12 +73,24 @@ export const MARKET_LOCATIONS = {
   city: { label: 'City', unlockCost: 25000, trafficMin: 1000, trafficMax: 5000, minVariety: 4 },
 };
 
+// A crop counts toward the variety minimum only with at least this many units offered for sale
+// (harvest minus what is kept in the barn).
 export const MIN_UNITS_FOR_VARIETY = 3;
 
 // Customer demand curve: MARKET_BASE_BUY_RATE of customers buy at the base price;
 // MARKET_PRICE_SENSITIVITY controls how quickly that share falls as the price rises.
 export const MARKET_BASE_BUY_RATE = 0.7;
 export const MARKET_PRICE_SENSITIVITY = 4;
+
+// Barn: keep harvested crops for a later market visit instead of selling them now. Kept crops come
+// back as harvest next visit, minus BARN_SPOILAGE of each crop (rounded up). Capacity is upgradable.
+export const BARN_LEVELS = [
+  { capacity: 30, cost: 0 },
+  { capacity: 60, cost: 2500 },
+  { capacity: 120, cost: 15000 },
+];
+export const BARN_SPOILAGE = 0.1;
+export const BARN_KEEP_STEP = 5;
 
 // Contracts: deliver a quantity of one crop to one market within a few visits for a bonus.
 // The quantity scales with the player's last harvest so contracts stay reachable as the farm grows.

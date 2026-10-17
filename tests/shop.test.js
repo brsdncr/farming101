@@ -23,7 +23,7 @@ test('the shop is a full screen with crop tiles and a farm & markets group', () 
   const html = openShop();
 
   assert.match(html, /class="shop-screen"/);
-  assert.equal((html.match(/class="shop-tile /g) ?? []).length, 8 + 4, '8 crops + hold, town, city, emergency');
+  assert.equal((html.match(/class="shop-tile /g) ?? []).length, 8 + 5, '8 crops + hold, barn, town, city, emergency');
   assert.match(html, /🌱 Crops/);
   assert.match(html, /Farm &amp; Markets/);
   assert.match(html, /📜 Contracts/);
