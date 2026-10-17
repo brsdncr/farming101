@@ -1,14 +1,28 @@
 import {
+  AUTO_HARVEST_MIN_GROUP_SIZE,
   CROP_BASE_PRICES,
   CROP_COLORS,
   CROP_EMOJIS,
   CROP_KEYS,
   CROP_SEED_CONFIG,
+  EMERGENCY_HARVEST_COST,
+  EMERGENCY_HARVEST_MAX_CHARGES,
+  MARKET_BASE_BUY_RATE,
   MARKET_DEMAND_WEIGHTS,
   MARKET_LOCATIONS,
-  MARKET_RIVAL_STAGES,
-  SEED_UPGRADE_COST_BY_LEVEL,
+  MARKET_PRICE_SENSITIVITY,
+  MIN_UNITS_FOR_VARIETY,
+  SEED_UPGRADE_COST_FACTOR,
+  SEED_UPGRADE_COST_GROWTH,
 } from './src/config/crops.js';
+import {
+  DEATH_AGE,
+  GOAL_COINS,
+  SEASONS,
+  START_AGE,
+  VISITS_PER_SEASON,
+  VISITS_PER_YEAR,
+} from './src/config/game.js';
 import { SHAPE_DEFINITIONS, SHAPE_TYPES } from './src/config/shapes.js';
 import {
   GRID_SIZE,
@@ -16,7 +30,7 @@ import {
   clearConnectedCells,
   cloneGrid,
   createGrid,
-  findConnectedGroup,
+  findAllConnectedGroups,
   isInsideGrid,
   placeShapeOnGrid,
 } from './src/state/gridState.js';
@@ -27,6 +41,11 @@ import {
   getInventoryTotal,
   weightedRandomCrop,
 } from './src/state/inventoryState.js';
+
+// The hand holds the block being played plus a preview of the next one.
+const CURRENT_SLOT = 0;
+const NEXT_SLOT = 1;
+const HAND_SIZE = 2;
 
 const state = createInitialGameState();
 const dragState = {
@@ -215,7 +234,8 @@ function getUpgradeCost(cropKey) {
     return null;
   }
 
-  return Number(SEED_UPGRADE_COST_BY_LEVEL[currentLevel + 1] ?? (currentLevel + 1) * 10);
+  const nextLevel = currentLevel + 1;
+  return Math.round(getCropSeedPrice(cropKey) * SEED_UPGRADE_COST_FACTOR * SEED_UPGRADE_COST_GROWTH ** (nextLevel - 2));
 }
 
 function getCropHarvestYieldBonus(cropKey) {
@@ -283,8 +303,9 @@ function consumeTetrominoFromInventory(inventory, tetromino) {
   const usage = {};
   for (const cell of tetromino.cells) {
     const cropType = cell.cropType;
+    // Unfilled blocks (drawn when stock ran low) cost nothing.
     if (!cropType) {
-      return false;
+      continue;
     }
     usage[cropType] = (usage[cropType] ?? 0) + 1;
   }
@@ -353,25 +374,41 @@ function createTetrominoFromShape(shapeType, inventory) {
     };
   }
 
-  const maxCells = Math.min(baseCells.length, totalAvailable);
-  const filledCells = [];
-
-  for (let index = 0; index < maxCells; index += 1) {
+  // The full shape is always kept; blocks left unfilled when stock runs out stay null.
+  for (const cell of baseCells) {
     const cropType = weightedRandomCrop(availableInventory);
     if (!cropType) {
       break;
     }
 
-    const nextCell = { ...baseCells[index], cropType };
-    filledCells.push(nextCell);
+    cell.cropType = cropType;
     consumeStock(availableInventory, cropType, 1);
   }
 
   return {
     id: `${shapeType}-${Math.random().toString(36).slice(2, 10)}`,
     shapeType,
-    cells: normalizeCells(filledCells),
+    cells: normalizeCells(baseCells),
   };
+}
+
+// Seeds still free once the crops shown in the other hand slots are set aside.
+function getUnreservedInventory(inventory, slots, excludedSlotIndex = null) {
+  const available = { ...inventory };
+
+  slots.forEach((tetromino, index) => {
+    if (index === excludedSlotIndex || !Array.isArray(tetromino?.cells)) {
+      return;
+    }
+
+    for (const cell of tetromino.cells) {
+      if (cell.cropType) {
+        available[cell.cropType] = Math.max(0, (available[cell.cropType] ?? 0) - 1);
+      }
+    }
+  });
+
+  return available;
 }
 
 function ensureBagHasShapes(bag) {
@@ -393,8 +430,8 @@ function createHandState(inventory) {
   const bag = createShapeBag();
   const slots = [];
 
-  for (let index = 0; index < 3; index += 1) {
-    const next = drawNextTetrominoFromBag(bag, inventory);
+  for (let index = 0; index < HAND_SIZE; index += 1) {
+    const next = drawNextTetrominoFromBag(bag, getUnreservedInventory(inventory, slots));
     slots.push(next.tetromino);
     bag.length = 0;
     for (const entry of next.bag) {
@@ -415,13 +452,9 @@ function createMarketState(overrides = {}) {
   return {
     location: currentLocation,
     crop: 'tomato',
-    entryFee: profile.entryFee,
     trafficMin: profile.trafficMin,
     trafficMax: profile.trafficMax,
-    competitors: profile.competitors,
     prices: { ...CROP_BASE_PRICES },
-    selectedQuantity: 0,
-    selectedQuantities: {},
     pendingSale: [],
     lastSummary: 'No sales run yet.',
     simulating: false,
@@ -437,50 +470,66 @@ function createMarketState(overrides = {}) {
   };
 }
 
+function createUnlockedMarketsState() {
+  return Object.fromEntries(
+    Object.entries(MARKET_LOCATIONS).map(([locationKey, profile]) => [locationKey, profile.unlockCost === 0]),
+  );
+}
+
 function getMarketLocationProfile() {
   return MARKET_LOCATIONS[state.market.location] ?? MARKET_LOCATIONS.village;
 }
 
-function clampMarketQuantity(cropKey = state.market.crop || 'tomato') {
-  const maxAvailable = state.cropInventory[cropKey] || 0;
-  const current = Number(state.market.selectedQuantities[cropKey] ?? 0);
-  const next = maxAvailable > 0 ? Math.min(Math.max(0, Number.isFinite(current) ? current : 0), maxAvailable) : 0;
+function isMarketUnlocked(locationKey) {
+  return state.unlockedMarkets[locationKey] === true;
+}
 
-  state.market.selectedQuantity = next;
-  state.market.selectedQuantities[cropKey] = next;
+// The crops a market's customers buy; other harvested crops can't be sold there.
+function getMarketProductPool(locationKey) {
+  return Object.keys(MARKET_DEMAND_WEIGHTS[locationKey] ?? {});
+}
+
+// A crop type counts toward the variety minimum only with enough units,
+// so a single token crop can't open a market for a one-crop harvest.
+function getVarietyCount(locationKey, cropInventory = state.cropInventory) {
+  return getMarketProductPool(locationKey)
+    .filter((crop) => (cropInventory[crop] ?? 0) >= MIN_UNITS_FOR_VARIETY)
+    .length;
+}
+
+// Share of customers who buy at this price: MARKET_BASE_BUY_RATE at the base price,
+// approaching 100% as the price drops and 0% as it rises.
+function getBuyChance(price, basePrice) {
+  const priceRatio = price / basePrice;
+  const baseOdds = (1 - MARKET_BASE_BUY_RATE) / MARKET_BASE_BUY_RATE;
+  return 1 / (1 + baseOdds * Math.exp(MARKET_PRICE_SENSITIVITY * (priceRatio - 1)));
 }
 
 function setMarketLocation(locationKey) {
-  if (!MARKET_LOCATIONS[locationKey]) {
+  if (!MARKET_LOCATIONS[locationKey] || !isMarketUnlocked(locationKey)) {
     return;
   }
 
   state.market.location = locationKey;
   const profile = MARKET_LOCATIONS[locationKey];
-  state.market.entryFee = profile.entryFee;
   state.market.trafficMin = profile.trafficMin;
   state.market.trafficMax = profile.trafficMax;
-  state.market.competitors = profile.competitors;
   state.market.lastSummary = `${profile.label} market selected.`;
   render();
 }
 
-function setMarketQuantity(value, cropKey = state.market.crop || 'tomato', shouldRender = true) {
-  const maxAvailable = state.cropInventory[cropKey] || 0;
-  const nextValue = Math.max(0, Math.min(Math.floor(Number(value) || 0), maxAvailable));
+function unlockMarket(locationKey) {
+  const profile = MARKET_LOCATIONS[locationKey];
 
-  state.market.selectedQuantities[cropKey] = nextValue;
-  state.market.selectedQuantity = nextValue;
-  state.market.crop = cropKey;
-
-  if (shouldRender) {
-    render();
+  if (!profile || isMarketUnlocked(locationKey) || state.coins < profile.unlockCost) {
+    return false;
   }
-}
 
-function adjustMarketQuantity(delta, cropKey = state.market.crop || 'tomato') {
-  const currentValue = Number(state.market.selectedQuantities[cropKey] ?? 0);
-  setMarketQuantity(currentValue + delta, cropKey);
+  state.coins -= profile.unlockCost;
+  state.unlockedMarkets[locationKey] = true;
+  state.shopFeedback = { message: `${profile.label} market unlocked`, kind: 'success' };
+  render();
+  return true;
 }
 
 function adjustMarketPrice(delta, cropKey = state.market.crop || 'tomato') {
@@ -488,61 +537,6 @@ function adjustMarketPrice(delta, cropKey = state.market.crop || 'tomato') {
   const nextPrice = Math.max(1, currentPrice + delta);
   state.market.prices[cropKey] = nextPrice;
   state.market.crop = cropKey;
-  render();
-}
-
-function getMaxReasonablePrice(crop) {
-  const basePrice = CROP_BASE_PRICES[crop] ?? 10;
-  return basePrice * 1.75;
-}
-
-function runMarketSimulation() {
-  const crop = state.market.crop || 'tomato';
-  const profile = getMarketLocationProfile();
-  const available = state.cropInventory[crop] || 0;
-  if (available <= 0) {
-    state.market.lastSummary = `No harvested ${crop} available to sell.`;
-    render();
-    return;
-  }
-
-  if (state.coins < profile.entryFee) {
-    state.market.lastSummary = `You need at least ${profile.entryFee} coins to sell in ${profile.label}.`;
-    render();
-    return;
-  }
-
-  const quantity = Math.min(Number(state.market.selectedQuantity) || 1, available);
-  const playerPrice = Number(state.market.prices[crop] ?? 5);
-  const basePrice = CROP_BASE_PRICES[crop] ?? 10;
-  const maxReasonablePrice = getMaxReasonablePrice(crop);
-
-  if (playerPrice > maxReasonablePrice) {
-    state.market.lastSummary = `${crop} is priced too high at ${playerPrice}. Buyers won't purchase it at that rate.`;
-    render();
-    return;
-  }
-
-  const aiPrices = Array.from({ length: profile.competitors }, () => {
-    const variance = (Math.random() * 0.4) - 0.2;
-    const competitorPrice = basePrice * (1 + variance);
-    return Math.max(1, competitorPrice);
-  });
-  const averageAiPrice = aiPrices.reduce((sum, value) => sum + value, 0) / aiPrices.length;
-  const traffic = Math.floor(Math.random() * (profile.trafficMax - profile.trafficMin + 1)) + profile.trafficMin;
-  const priceAdvantage = playerPrice <= averageAiPrice ? 1 : Math.max(0.25, averageAiPrice / playerPrice);
-  const demandRatio = Math.min(1, traffic / profile.trafficMax);
-  const sellChance = Math.min(1, (0.35 + demandRatio * 0.65) * priceAdvantage);
-  const soldCount = Math.max(0, Math.min(quantity, Math.round(quantity * sellChance)));
-  const unsoldCount = quantity - soldCount;
-  const revenue = soldCount * playerPrice;
-
-  state.coins -= profile.entryFee;
-  state.coins += revenue;
-  state.cropInventory[crop] = Math.max(0, (state.cropInventory[crop] ?? 0) - quantity);
-  state.market.selectedQuantity = Math.min(Math.max(1, quantity), Math.max(1, state.cropInventory[crop] || 1));
-  state.market.lastSummary = `Sold ${soldCount}/${quantity} ${crop} at ${playerPrice} coins each in ${profile.label}. AI avg: ${averageAiPrice.toFixed(1)}. Entry fee: ${profile.entryFee}. ${unsoldCount} spoiled and decayed.`;
-  state.market.lastSummary += ` Revenue: ${revenue} coins.`;
   render();
 }
 
@@ -569,21 +563,14 @@ function weightedRandomEntry(weights, random) {
   return entries.at(-1)?.[0] ?? null;
 }
 
-const RIVAL_ARCHETYPES = [
-  { name: 'General', assortmentOffset: 1, stockFactor: 0.9, priceMin: 0.9, priceMax: 1.1 },
-  { name: 'Specialist', assortmentOffset: -1, stockFactor: 1.2, priceMin: 0.95, priceMax: 1.15 },
-  { name: 'Discount', assortmentOffset: 0, stockFactor: 1, priceMin: 0.8, priceMax: 1 },
-];
-
+// Each customer wants one crop, drawn from the market's demand weights. A customer who
+// wants a crop the player brought (and still has in stock) buys it with getBuyChance.
 function buildMarketCustomerSimulation(profile, selectedCrops, options = {}) {
   const random = options.random ?? Math.random;
-  const stage = MARKET_RIVAL_STAGES[state.market.location] ?? MARKET_RIVAL_STAGES.village;
   const demandWeights = MARKET_DEMAND_WEIGHTS[state.market.location] ?? MARKET_DEMAND_WEIGHTS.village;
-  const baseDemand = Object.values(demandWeights).reduce((sum, weight) => sum + weight, 0);
   const traffic = randomMarketCount(profile.trafficMin, profile.trafficMax, random);
-  const sellers = [{
+  const seller = {
     name: 'You',
-    archetype: 'Player',
     customers: 0,
     requested: 0,
     sold: 0,
@@ -591,73 +578,15 @@ function buildMarketCustomerSimulation(profile, selectedCrops, options = {}) {
     crops: {},
     cropSales: {},
     assortment: {},
-  }];
-
-  const unlockedProductCount = CROP_KEYS.filter((crop) => getCropSeedLevel(crop) > 0).length;
-  const averageTraffic = (profile.trafficMin + profile.trafficMax) / 2;
-  const rivalCount = Math.max(0, Math.floor(profile.competitors));
-  for (let rivalIndex = 0; rivalIndex < rivalCount; rivalIndex += 1) {
-    const archetype = RIVAL_ARCHETYPES[rivalIndex % RIVAL_ARCHETYPES.length];
-    const eligibleCrops = stage.productPool;
-    const maximumAssortment = Math.min(stage.maxProducts, eligibleCrops.length);
-    const minimumSize = archetype.name === 'Specialist'
-      ? 1
-      : Math.max(1, Math.min(maximumAssortment, unlockedProductCount + archetype.assortmentOffset - 1));
-    const maximumSize = archetype.name === 'Specialist'
-      ? 1
-      : Math.max(minimumSize, Math.min(maximumAssortment, unlockedProductCount + archetype.assortmentOffset + 1));
-    const assortmentSize = randomMarketCount(minimumSize, maximumSize, random);
-    const unselectedCrops = [...eligibleCrops];
-    const assortment = {};
-
-    for (let productIndex = 0; productIndex < assortmentSize && unselectedCrops.length > 0; productIndex += 1) {
-      const cropIndex = Math.floor(random() * unselectedCrops.length);
-      const crop = unselectedCrops.splice(cropIndex, 1)[0];
-      const referencePrice = CROP_BASE_PRICES[crop] ?? 10;
-      const priceMultiplier = archetype.priceMin + random() * (archetype.priceMax - archetype.priceMin);
-      const price = Math.max(1, Math.round(referencePrice * priceMultiplier));
-      const cropDemand = Number(demandWeights[crop] ?? 0) / baseDemand;
-      const expectedDemand = averageTraffic * cropDemand * archetype.stockFactor;
-      const stockVariation = 0.75 + random() * 0.5;
-      const stock = Math.max(1, Math.round(expectedDemand * stockVariation));
-
-      assortment[crop] = {
-        price,
-        stock: Math.min(stock, stage.stockCapacity),
-        initialStock: Math.min(stock, stage.stockCapacity),
-      };
-    }
-
-    let remainingCapacity = stage.stockCapacity;
-    for (const offer of Object.values(assortment)) {
-      offer.stock = Math.min(offer.stock, remainingCapacity);
-      offer.initialStock = offer.stock;
-      remainingCapacity -= offer.stock;
-    }
-
-    sellers.push({
-      name: `Rival ${rivalIndex + 1}`,
-      archetype: archetype.name,
-      customers: 0,
-      requested: 0,
-      sold: 0,
-      revenue: 0,
-      crops: {},
-      cropSales: {},
-      assortment,
-    });
-  }
+  };
 
   for (const crop of selectedCrops) {
-    const offeredStock = Math.min(
-      Math.max(0, Number(state.market.selectedQuantities[crop] ?? 0)),
-      Math.max(0, Number(state.cropInventory[crop] ?? 0)),
-    );
-    if (offeredStock > 0) {
-      sellers[0].assortment[crop] = {
-        price: Math.max(1, Number(state.market.prices[crop] ?? CROP_BASE_PRICES[crop] ?? 5)),
-        stock: offeredStock,
-        initialStock: offeredStock,
+    const stock = Math.max(0, Number(state.cropInventory[crop] ?? 0));
+    if (stock > 0) {
+      seller.assortment[crop] = {
+        price: Math.max(1, Number(state.market.prices[crop] ?? CROP_BASE_PRICES[crop])),
+        stock,
+        initialStock: stock,
       };
     }
   }
@@ -665,54 +594,22 @@ function buildMarketCustomerSimulation(profile, selectedCrops, options = {}) {
   const customerNeeds = Array.from({ length: traffic }, () => weightedRandomEntry(demandWeights, random));
   const events = [];
 
-  for (let customerIndex = 0; customerIndex < customerNeeds.length; customerIndex += 1) {
-    const crop = customerNeeds[customerIndex];
-    const referencePrice = CROP_BASE_PRICES[crop] ?? 10;
-    const budget = referencePrice * (1.2 + random() * 0.6);
-    const optionsForPurchase = [];
-
-    for (const seller of sellers) {
-      const offer = seller.assortment[crop];
-      if (!offer) {
-        continue;
-      }
-
-      seller.requested += 1;
-      if (offer.stock <= 0 || offer.price > budget
-        || (seller === sellers[0] && offer.price > getMaxReasonablePrice(crop))) {
-        continue;
-      }
-
-      seller.customers += 1;
-      optionsForPurchase.push({
-        seller,
-        offer,
-        weight: Math.exp(-2 * (offer.price / referencePrice - 0.8)),
-      });
+  customerNeeds.forEach((crop, customerIndex) => {
+    const offer = seller.assortment[crop];
+    if (!offer) {
+      return;
     }
 
-    const noPurchaseWeight = 0.55;
-    const totalWeight = noPurchaseWeight + optionsForPurchase.reduce((sum, option) => sum + option.weight, 0);
-    let choice = random() * totalWeight;
-    let purchasedOption = null;
-
-    for (const option of optionsForPurchase) {
-      choice -= option.weight;
-      if (choice < 0) {
-        purchasedOption = option;
-        break;
-      }
+    seller.requested += 1;
+    // Customers arriving after a crop sold out walk past and aren't animated.
+    if (offer.stock <= 0) {
+      return;
     }
 
-    let sold = 0;
-    let revenue = 0;
-    let sellerName = null;
-    let sellerKey = null;
-    let table = 'market';
-    let price = 0;
+    seller.customers += 1;
+    const bought = random() < getBuyChance(offer.price, CROP_BASE_PRICES[crop]);
 
-    if (purchasedOption) {
-      const { seller, offer } = purchasedOption;
+    if (bought) {
       offer.stock -= 1;
       seller.sold += 1;
       seller.revenue += offer.price;
@@ -721,195 +618,59 @@ function buildMarketCustomerSimulation(profile, selectedCrops, options = {}) {
       cropSale.quantity += 1;
       cropSale.revenue += offer.price;
       seller.cropSales[crop] = cropSale;
-      sold = 1;
-      revenue = offer.price;
-      sellerName = seller.name;
-      sellerKey = seller === sellers[0] ? 'you' : `rival-${sellers.indexOf(seller)}`;
-      table = seller === sellers[0] ? 'you' : sellerKey;
-      price = offer.price;
     }
 
     events.push({
       id: `customer-${customerIndex + 1}`,
-      sellerName,
-      sellerKey,
-      table,
-      side: customerIndex % 2 === 0 ? 'left' : 'right',
+      sellerName: bought ? seller.name : null,
+      sellerKey: bought ? 'you' : null,
+      table: bought ? 'you' : 'market',
+      side: events.length % 2 === 0 ? 'left' : 'right',
       crop,
       wantedCrop: crop,
       emoji: CROP_EMOJIS[crop] ?? '🌱',
       customerIndex: customerIndex + 1,
       requested: 1,
-      offered: optionsForPurchase.length > 0,
-      sold,
-      revenue,
-      price,
+      offered: true,
+      sold: bought ? 1 : 0,
+      revenue: bought ? offer.price : 0,
+      price: offer.price,
     });
-  }
-
-  const totalRequested = sellers.reduce((sum, seller) => sum + seller.requested, 0);
-  const totalSold = sellers.reduce((sum, seller) => sum + seller.sold, 0);
-  const totalRevenue = sellers.reduce((sum, seller) => sum + seller.revenue, 0);
+  });
 
   return {
-    sellers,
+    sellers: [seller],
     events,
     customerNeeds,
     totalCustomers: traffic,
-    totalRequested,
-    totalSold,
-    totalRevenue,
+    totalRequested: seller.requested,
+    totalSold: seller.sold,
+    totalRevenue: seller.revenue,
   };
 }
 
-function buildSaleReport(profile, selectedCrops) {
-  const sellers = [{
-    name: 'You',
-    customers: 0,
-    requested: 0,
-    sold: 0,
-    revenue: 0,
-    crops: {},
-  }];
-
-  for (let index = 0; index < profile.competitors; index += 1) {
-    sellers.push({
-      name: `Rival ${index + 1}`,
-      customers: 0,
-      requested: 0,
-      sold: 0,
-      revenue: 0,
-      crops: {},
-    });
-  }
-
-  const events = [];
-  const playerRemainingStock = {};
-
-  for (const crop of selectedCrops) {
-    playerRemainingStock[crop] = Math.min(Number(state.market.selectedQuantities[crop] ?? 0), state.cropInventory[crop] ?? 0);
-  }
-
-  const processSellerCustomers = (seller, sellerIndex, customerCount, isPlayer) => {
-    for (let customerIndex = 0; customerIndex < customerCount; customerIndex += 1) {
-      let crop;
-      let sold = 0;
-      let revenue = 0;
-      let price = 0;
-
-      if (isPlayer) {
-        crop = selectedCrops[Math.floor(Math.random() * selectedCrops.length)] ?? 'tomato';
-        const basePrice = CROP_BASE_PRICES[crop] ?? 10;
-        const playerPrice = Number(state.market.prices[crop] ?? basePrice ?? 5);
-        const maxReasonablePrice = getMaxReasonablePrice(crop);
-        const competitorSet = Array.from({ length: profile.competitors }, () => {
-          const variance = (Math.random() * 0.4) - 0.2;
-          return Math.max(1, basePrice * (1 + variance));
-        });
-        const averageAiPrice = competitorSet.reduce((sum, value) => sum + value, 0) / competitorSet.length;
-        const priceAdvantage = playerPrice <= averageAiPrice ? 1 : Math.max(0.25, averageAiPrice / playerPrice);
-        const demandRatio = Math.min(1, customerCount / Math.max(profile.trafficMax, 1));
-        const sellChance = Math.min(1, (0.35 + demandRatio * 0.65) * priceAdvantage);
-        const canSell = (playerRemainingStock[crop] ?? 0) > 0 && playerPrice <= maxReasonablePrice;
-        sold = canSell && Math.random() < sellChance ? 1 : 0;
-        price = playerPrice;
-        revenue = sold * playerPrice;
-
-        if (sold > 0) {
-          playerRemainingStock[crop] = Math.max(0, (playerRemainingStock[crop] ?? 0) - 1);
-        }
-      } else {
-        crop = CROP_KEYS[Math.floor(Math.random() * CROP_KEYS.length)];
-        const basePrice = CROP_BASE_PRICES[crop] ?? 10;
-        const sellChance = 0.55 + Math.random() * 0.35;
-        sold = Math.random() < sellChance ? 1 : 0;
-        price = basePrice;
-        revenue = sold * basePrice;
-      }
-
-      seller.customers += 1;
-      seller.requested += 1;
-      seller.sold += sold;
-      seller.revenue += revenue;
-      seller.crops[crop] = (seller.crops[crop] ?? 0) + sold;
-
-      events.push({
-        id: `${seller.name.toLowerCase()}-${seller.customers}`,
-        sellerName: seller.name,
-        sellerKey: isPlayer ? 'you' : `rival-${sellerIndex}`,
-        table: isPlayer ? 'you' : `rival-${sellerIndex}`,
-        side: customerIndex % 2 === 0 ? 'left' : 'right',
-        crop,
-        emoji: CROP_EMOJIS[crop] ?? '🌱',
-        customerIndex: seller.customers,
-        requested: 1,
-        sold,
-        revenue,
-        price,
-      });
-    }
-  };
-
-  const playerCustomerCount = randomMarketCount(profile.trafficMin, profile.trafficMax);
-  processSellerCustomers(sellers[0], 0, playerCustomerCount, true);
-
-  for (let sellerIndex = 1; sellerIndex < sellers.length; sellerIndex += 1) {
-    const seller = sellers[sellerIndex];
-    const customerCount = randomMarketCount(profile.trafficMin, profile.trafficMax);
-    processSellerCustomers(seller, sellerIndex, customerCount, false);
-  }
-
-  const totalCustomers = sellers.reduce((sum, seller) => sum + seller.customers, 0);
-  const totalRequested = sellers.reduce((sum, seller) => sum + seller.requested, 0);
-  const totalSold = sellers.reduce((sum, seller) => sum + seller.sold, 0);
-  const totalRevenue = sellers.reduce((sum, seller) => sum + seller.revenue, 0);
-
-  return { sellers, events, totalCustomers, totalRequested, totalSold, totalRevenue };
-}
-
-// function buildSaleReport(profile, selectedCrops) {
-//   const simulation = buildMarketCustomerSimulation(profile, selectedCrops);
-//   return {
-//     sellers: simulation.sellers,
-//     totalCustomers: simulation.totalCustomers,
-//     totalRequested: simulation.totalRequested,
-//     totalSold: simulation.totalSold,
-//     totalRevenue: simulation.totalRevenue,
-//   };
-// }
-
-function finalizeMarketSimulation(profile, simulation, selectedCrops) {
+// Settles a sale once: every harvested crop went to market, so unsold stock and crops
+// this market doesn't buy spoil. Harvested crops never turn back into seeds.
+function finalizeMarketSimulation(profile, simulation) {
   if (!state.market.simulating || state.market.activeSimulation !== simulation) {
     return;
   }
 
   const playerSeller = simulation.sellers[0];
   const totalRevenue = playerSeller.revenue;
-  const summaries = selectedCrops.map((crop) => {
-    const offeredQuantity = Math.min(Number(state.market.selectedQuantities[crop] ?? 0), state.cropInventory[crop] ?? 0);
-    const soldCount = playerSeller.crops[crop] ?? 0;
-    const price = Number(state.market.prices[crop] ?? CROP_BASE_PRICES[crop] ?? 5);
-    const unselectedQuantity = Math.max(0, (state.cropInventory[crop] ?? 0) - offeredQuantity);
+  const summaries = CROP_KEYS
+    .filter((crop) => (state.cropInventory[crop] ?? 0) > 0)
+    .map((crop) => {
+      const brought = state.cropInventory[crop];
+      const sale = playerSeller.cropSales[crop];
+      return sale
+        ? `${crop}: sold ${sale.quantity}/${brought} for +${sale.revenue}`
+        : `${crop}: ${brought} spoiled`;
+    });
 
-    if (soldCount > 0) {
-      return `${crop}: +${soldCount * price} (${soldCount}/${offeredQuantity}) +${unselectedQuantity} seed`;
-    }
-
-    return `${crop}: ${offeredQuantity} discarded +${unselectedQuantity} seed`;
-  });
-
-  for (const crop of selectedCrops) {
-    const cropStock = state.cropInventory[crop] ?? 0;
-    const offeredQuantity = Math.min(Number(state.market.selectedQuantities[crop] ?? 0), cropStock);
-    const unselectedQuantity = Math.max(0, cropStock - offeredQuantity);
-
-    state.inventory[crop] = (state.inventory[crop] ?? 0) + unselectedQuantity;
-    state.cropInventory[crop] = 0;
-    state.market.selectedQuantities[crop] = 0;
-  }
-
-  state.coins -= profile.entryFee;
+  state.cropInventory = createCropInventoryState();
   state.coins += totalRevenue;
+  advanceTime();
   state.market.simulating = false;
   state.market.saleComplete = true;
   state.market.saleReport = {
@@ -923,27 +684,70 @@ function finalizeMarketSimulation(profile, simulation, selectedCrops) {
   state.market.skipAnimationEnabledAt = 0;
   state.market.activeSimulation = null;
   state.market.activeSelectedCrops = [];
-  state.market.lastSummary = `Selling in ${profile.label}: ${summaries.join(' • ')}. Entry fee: ${profile.entryFee}. Total revenue: ${totalRevenue} coins.`;
+  state.market.lastSummary = `Selling in ${profile.label}: ${summaries.join(' • ')}. Total revenue: ${totalRevenue} coins.`;
+  render();
+}
+
+function getSellingBlocker() {
+  const profile = getMarketLocationProfile();
+  const locationKey = state.market.location;
+
+  if (!isMarketUnlocked(locationKey)) {
+    return `${profile.label} is locked. Unlock it in the shop.`;
+  }
+
+  const variety = getVarietyCount(locationKey);
+  if (variety < profile.minVariety) {
+    return `${profile.label} needs ${profile.minVariety} crop types with ${MIN_UNITS_FOR_VARIETY}+ harvested units each. You have ${variety}.`;
+  }
+
+  return null;
+}
+
+function canSellAnywhere() {
+  return Object.entries(MARKET_LOCATIONS).some(([locationKey, profile]) => (
+    isMarketUnlocked(locationKey) && getVarietyCount(locationKey) >= profile.minVariety
+  ));
+}
+
+// Leaves the market for a fresh field: whatever is still planted is discarded, then the shop opens.
+function startNextSeason() {
+  clearBoardForReturn();
+  state.marketOpen = false;
+  state.market.saleScreenOpen = false;
+  state.market.saleComplete = false;
+  state.market.simulating = false;
+  state.market.activeSimulation = null;
+  state.market.activeSelectedCrops = [];
+  state.market.skipAnimationEnabledAt = 0;
+  state.shopOpen = true;
+}
+
+// Way out when no unlocked market accepts the harvest: time passes and the harvest is lost.
+function skipSeason() {
+  if (state.market.simulating || canSellAnywhere()) {
+    return;
+  }
+
+  state.cropInventory = createCropInventoryState();
+  advanceTime();
+  startNextSeason();
+  state.market.lastSummary = 'Season skipped. The harvest and the field were discarded.';
   render();
 }
 
 function startSelling() {
   const profile = getMarketLocationProfile();
+  const blocker = getSellingBlocker();
 
-  if (state.coins < profile.entryFee) {
-    state.market.lastSummary = `You need at least ${profile.entryFee} coins to sell in ${profile.label}.`;
+  if (blocker) {
+    state.market.lastSummary = blocker;
     render();
     return;
   }
 
-  const selectedCrops = CROP_KEYS.filter((crop) => (Number(state.market.selectedQuantities[crop] ?? 0) > 0) && (state.cropInventory[crop] ?? 0) > 0);
-
-  if (selectedCrops.length === 0) {
-    state.market.lastSummary = `Select a crop quantity to start selling.`;
-    render();
-    return;
-  }
-
+  const selectedCrops = getMarketProductPool(state.market.location)
+    .filter((crop) => (state.cropInventory[crop] ?? 0) > 0);
   const simulation = buildMarketCustomerSimulation(profile, selectedCrops);
 
   state.marketOpen = false;
@@ -967,8 +771,13 @@ function startSelling() {
   }, 3000);
 
   const advanceCustomerSimulation = () => {
+    // Stop the loop once this sale has been finalized (e.g. via Skip Animation).
+    if (!state.market.simulating || state.market.activeSimulation !== simulation) {
+      return;
+    }
+
     if (state.market.skipAnimation) {
-      finalizeMarketSimulation(profile, simulation, selectedCrops);
+      finalizeMarketSimulation(profile, simulation);
       return;
     }
 
@@ -976,16 +785,14 @@ function startSelling() {
     const event = state.market.simulationEvents[nextIndex];
 
     if (!event) {
-      finalizeMarketSimulation(profile, simulation, selectedCrops);
+      finalizeMarketSimulation(profile, simulation);
       return;
     }
 
     state.market.currentCustomerIndex = nextIndex;
     state.market.lastSummary = event.sold
       ? `${event.sellerName} sold ${event.crop} for +$${event.revenue}.`
-      : event.offered
-        ? `A customer passed on ${event.crop}.`
-        : `A customer wanted ${event.crop}, but no store could fulfill the demand.`;
+      : `A customer passed on ${event.crop} at ${event.price} coins.`;
 
     render();
 
@@ -1006,7 +813,8 @@ function createInitialGameState() {
 
   return {
     round: 1,
-    season: 'summer',
+    age: START_AGE,
+    season: SEASONS[0],
     coins: 20,
     grid: createGrid(6, 6),
     inventory,
@@ -1014,6 +822,7 @@ function createInitialGameState() {
     seedLevels,
     hand,
     market: createMarketState(),
+    unlockedMarkets: createUnlockedMarketsState(),
     marketOpen: false,
     shopOpen: false,
     shopFeedback: null,
@@ -1023,27 +832,84 @@ function createInitialGameState() {
     dragPreview: null,
     gameOver: false,
     gameOverReason: '',
+    gameResult: null,
+    emergencyHarvests: EMERGENCY_HARVEST_MAX_CHARGES,
+    harvestFeedback: '',
   };
 }
 
+// Calendar after a number of finished market visits: 2 visits per season, 4 per year.
+function getCalendar(visitsCompleted) {
+  return {
+    age: START_AGE + Math.floor(visitsCompleted / VISITS_PER_YEAR),
+    season: SEASONS[Math.floor(visitsCompleted / VISITS_PER_SEASON) % SEASONS.length],
+  };
+}
+
+function advanceTime() {
+  state.round += 1;
+  Object.assign(state, getCalendar(state.round - 1));
+}
+
+function getCheapestSeedPackCost() {
+  return Math.min(...CROP_KEYS.filter((crop) => getCropSeedLevel(crop) > 0).map(getCropSeedPrice));
+}
+
+// Nothing left to plant, harvest or sell, and not enough coins to buy seeds.
+function isBankrupt() {
+  return getInventoryTotal(state.inventory) === 0
+    && getInventoryTotal(state.cropInventory) === 0
+    && isFieldEmpty()
+    && state.coins < getCheapestSeedPackCost();
+}
+
+function getGameEndResult() {
+  if (state.coins >= GOAL_COINS) {
+    return {
+      kind: 'won',
+      reason: `You became a millionaire at age ${state.age}!`,
+    };
+  }
+
+  if (state.age >= DEATH_AGE) {
+    return {
+      kind: 'died',
+      reason: `You reached ${DEATH_AGE} with ${state.coins.toLocaleString('en-US')} coins. The million slipped away.`,
+    };
+  }
+
+  if (isBankrupt()) {
+    return {
+      kind: 'bankrupt',
+      reason: 'You have no seeds, nothing to harvest, and not enough coins for a seed pack.',
+    };
+  }
+
+  return null;
+}
+
+// Evaluated from render. Waits while the sale screen is open so the summary is always shown first.
 function checkForGameOver() {
   if (state.gameOver) {
     return true;
   }
 
-  const canHarvest = state.coins >= 5;
-
-  if (!canHarvest) {
-    state.gameOver = true;
-    state.gameOverReason = 'You ran out of coins and can no longer afford to harvest.';
-    state.marketOpen = false;
-    state.shopOpen = false;
-    state.market.saleScreenOpen = false;
-    state.market.simulating = false;
-    return true;
+  if (state.market.saleScreenOpen) {
+    return false;
   }
 
-  return false;
+  const result = getGameEndResult();
+  if (!result) {
+    return false;
+  }
+
+  state.gameOver = true;
+  state.gameResult = result.kind;
+  state.gameOverReason = result.reason;
+  state.marketOpen = false;
+  state.shopOpen = false;
+  state.market.simulating = false;
+  return true;
 }
 
 function resetGameState() {
@@ -1059,6 +925,7 @@ function clearBoardForReturn() {
   state.dragPreview = null;
   state.activeSlotIndex = null;
   state.hand = createHandState(state.inventory);
+  state.harvestFeedback = '';
   state.market.simulationEvents = [];
   state.market.currentCustomerIndex = -1;
   state.market.saleReport = null;
@@ -1078,36 +945,98 @@ function nextTetrominoInBag(inventory) {
   return { tetromino, bag: nextBag };
 }
 
-function refillSlot(slotIndex) {
-  const { tetromino, bag } = nextTetrominoInBag(state.inventory);
-  state.hand.slots[slotIndex] = tetromino;
+// After the current block is placed, the next block moves up and a new next block is drawn.
+function advanceHand() {
+  state.hand.slots[CURRENT_SLOT] = state.hand.slots[NEXT_SLOT];
+  const available = getUnreservedInventory(state.inventory, state.hand.slots, NEXT_SLOT);
+  const { tetromino, bag } = nextTetrominoInBag(available);
+  state.hand.slots[NEXT_SLOT] = tetromino;
   state.hand.bag = bag;
 }
 
-function harvestSelectedGroup() {
-  if (state.highlightedGroup.length === 0 || state.coins < 5) {
+function swapHandBlocks() {
+  if (dragState.active) {
     return;
   }
 
-  const harvestedCounts = {};
-  for (const cell of state.highlightedGroup) {
-    const cropType = state.grid[cell.row][cell.col];
-    if (!cropType) {
-      continue;
-    }
-
-    harvestedCounts[cropType] = (harvestedCounts[cropType] ?? 0) + 1;
-    state.cropInventory[cropType] = (state.cropInventory[cropType] ?? 0) + 1;
-  }
-
-  state.coins -= 5;
-  state.grid = clearConnectedCells(state.grid, state.highlightedGroup);
-  state.highlightedGroup = [];
+  const { slots } = state.hand;
+  [slots[CURRENT_SLOT], slots[NEXT_SLOT]] = [slots[NEXT_SLOT], slots[CURRENT_SLOT]];
   render();
 }
 
+// Harvesting is free: crops move from the field into the harvested stock for market,
+// and their cells are cleared. Returns the harvested quantities per crop.
+// Units harvested from one connected group of `tileCount` tiles.
+// Seed level bonus is a flat extra yield per harvested group, not per tile.
+function getHarvestYield(cropKey, tileCount, { withLevelBonus = true } = {}) {
+  return tileCount + (withLevelBonus ? getCropHarvestYieldBonus(cropKey) : 0);
+}
+
+function harvestGroups(groups, { withLevelBonus }) {
+  const harvested = {};
+
+  for (const group of groups) {
+    const quantity = getHarvestYield(group.cropType, group.cells.length, { withLevelBonus });
+    harvested[group.cropType] = (harvested[group.cropType] ?? 0) + quantity;
+    state.grid = clearConnectedCells(state.grid, group.cells);
+  }
+
+  for (const [cropType, quantity] of Object.entries(harvested)) {
+    state.cropInventory[cropType] = (state.cropInventory[cropType] ?? 0) + quantity;
+  }
+
+  return harvested;
+}
+
+function describeHarvest(prefix, harvested) {
+  const crops = Object.entries(harvested)
+    .map(([cropType, quantity]) => `${CROP_EMOJIS[cropType] ?? '🌱'} ${quantity}`)
+    .join(' · ');
+  return `${prefix}: ${crops}`;
+}
+
+// Runs after every placement: any group that has grown large enough is harvested.
+function autoHarvest() {
+  const groups = findAllConnectedGroups(state.grid)
+    .filter((group) => group.cells.length >= AUTO_HARVEST_MIN_GROUP_SIZE);
+
+  if (groups.length === 0) {
+    return;
+  }
+
+  state.harvestFeedback = describeHarvest('Auto-harvested', harvestGroups(groups, { withLevelBonus: true }));
+}
+
+function isFieldEmpty() {
+  return state.grid.every((row) => row.every((cell) => !cell));
+}
+
+// One-shot joker for a field clogged with small groups: harvests everything, without level bonus.
+function emergencyHarvest() {
+  if (state.emergencyHarvests <= 0 || isFieldEmpty()) {
+    return;
+  }
+
+  const groups = findAllConnectedGroups(state.grid);
+  state.emergencyHarvests -= 1;
+  state.harvestFeedback = describeHarvest('Emergency harvest', harvestGroups(groups, { withLevelBonus: false }));
+  render();
+}
+
+function restockEmergencyHarvest() {
+  if (state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES || state.coins < EMERGENCY_HARVEST_COST) {
+    return false;
+  }
+
+  state.coins -= EMERGENCY_HARVEST_COST;
+  state.emergencyHarvests += 1;
+  state.shopFeedback = { message: 'Emergency harvest restocked', kind: 'success' };
+  render();
+  return true;
+}
+
 function rotateSelectedTetromino(slotIndex = state.activeSlotIndex ?? dragState.slotIndex) {
-  if (slotIndex === null || slotIndex === undefined) {
+  if (slotIndex !== CURRENT_SLOT) {
     return;
   }
 
@@ -1148,6 +1077,10 @@ function getBoardCellFromPointer(event) {
 }
 
 function startDrag(slotIndex, event) {
+  if (slotIndex !== CURRENT_SLOT) {
+    return;
+  }
+
   const tetromino = state.hand.slots[slotIndex];
   if (!tetromino || !tetromino.cells || tetromino.cells.length === 0) {
     return;
@@ -1262,7 +1195,9 @@ function finishDrag(event) {
       const inventoryUpdated = consumeTetrominoFromInventory(state.inventory, tetromino);
       if (inventoryUpdated) {
         state.grid = placedGrid;
-        refillSlot(dragState.slotIndex);
+        state.harvestFeedback = '';
+        autoHarvest();
+        advanceHand();
       }
     }
   }
@@ -1346,7 +1281,7 @@ function renderBoardDragPreview() {
       class="board-preview-cell ${preview.valid ? 'valid' : 'invalid'}"
       style="grid-row:${cell.row - minRow + 1}; grid-column:${cell.col - minCol + 1}; width:${metrics.cellWidth}px; height:${metrics.cellHeight}px;"
     >
-      ${renderCropPixelArt(cell.cropType, 0.8)}
+      ${cell.cropType ? renderCropPixelArt(cell.cropType, 0.8) : ''}
     </div>
   `).join('');
 
@@ -1362,32 +1297,60 @@ function renderBoardDragPreview() {
 }
 
 function renderHandSlots() {
-  return state.hand.slots
+  const cards = state.hand.slots
     .map((tetromino, index) => {
       const safeTetromino = tetromino && tetromino.cells ? tetromino : { shapeType: 'O', cells: [] };
-      const cells = [];
-
-      for (let row = 0; row < 4; row += 1) {
-        for (let col = 0; col < 4; col += 1) {
-          const cell = safeTetromino.cells.find((entry) => entry.row === row && entry.col === col);
-          const hasCrop = !!cell;
-          const fillColor = hasCrop ? CROP_COLORS[cell.cropType] : '#2b3038';
-          cells.push(`
-            <div class="slot-cell ${hasCrop ? 'filled' : ''}" style="background:#3c2d22; border-color:${hasCrop ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.02)'}">
-              ${hasCrop ? renderCropPixelArt(cell.cropType, 1) : ''}
-            </div>
-          `);
-        }
-      }
+      const shapeWidth = Math.max(0, ...safeTetromino.cells.map((cell) => cell.col + 1));
+      const shapeHeight = Math.max(0, ...safeTetromino.cells.map((cell) => cell.row + 1));
+      // The mini grid has 8x8 half-size tracks and each block spans 2, so any shape can be centered exactly.
+      const colOffset = 4 - shapeWidth;
+      const rowOffset = 4 - shapeHeight;
+      const cells = safeTetromino.cells.map((cell) => `
+        <div
+          class="slot-cell filled"
+          style="grid-row:${rowOffset + cell.row * 2 + 1} / span 2; grid-column:${colOffset + cell.col * 2 + 1} / span 2; background:#3c2d22; border-color:rgba(255,255,255,0.08);"
+        >
+          ${cell.cropType ? renderCropPixelArt(cell.cropType, 1) : ''}
+        </div>
+      `);
 
       return `
-        <div class="tetromino-card ${state.activeSlotIndex === index ? 'selected' : ''}" data-slot-index="${index}">
-          <div class="shape-name">${safeTetromino.shapeType}</div>
+        <div class="tetromino-card ${index === NEXT_SLOT ? 'next-card' : ''} ${state.activeSlotIndex === index ? 'selected' : ''}" data-slot-index="${index}">
+          <div class="shape-name">${index === CURRENT_SLOT ? 'Current' : 'Next'}</div>
           <div class="mini-grid">${cells.join('')}</div>
         </div>
       `;
-    })
-    .join('');
+    });
+
+  return `
+    ${cards[CURRENT_SLOT]}
+    <button id="hand-next-button" type="button" class="swap-button" title="Swap the current block with the next one" aria-label="Swap">🔁</button>
+    ${cards[NEXT_SLOT]}
+  `;
+}
+
+function renderEmergencyButton() {
+  if (state.marketOpen || state.shopOpen) {
+    return '';
+  }
+
+  const hasCharge = state.emergencyHarvests > 0;
+  const title = hasCharge
+    ? 'Harvest the entire field. Can be used once; restock it in the shop.'
+    : 'Used. Restock it in the shop after selling.';
+
+  return `
+    <button
+      id="emergency-harvest-button"
+      type="button"
+      class="emergency-button"
+      title="${title}"
+      ${!hasCharge || isFieldEmpty() ? 'disabled' : ''}
+    >
+      <span class="emergency-emoji" aria-hidden="true">🚨</span>
+      <span class="emergency-label">${hasCharge ? 'Emergency' : 'Used'}</span>
+    </button>
+  `;
 }
 
 function renderDragGhost() {
@@ -1415,7 +1378,7 @@ function renderDragGhost() {
       class="drag-ghost-cell"
       style="grid-row:${cell.row - minRow + 1}; grid-column:${cell.col - minCol + 1}; width:${tileSize}px; height:${tileSize}px;"
     >
-      ${renderCropPixelArt(cell.cropType)}
+      ${cell.cropType ? renderCropPixelArt(cell.cropType) : ''}
     </div>
   `).join('');
 
@@ -1450,6 +1413,53 @@ function renderShopPanel() {
         ` : ''}
 
         <div class="shop-list" data-shop-list>
+          <div class="shop-row">
+            <div class="shop-row-header">
+              <div class="sale-row-label">
+                <span aria-hidden="true">🚨</span>
+                <span>Emergency harvest</span>
+              </div>
+              <span class="shop-level-tag">${state.emergencyHarvests}/${EMERGENCY_HARVEST_MAX_CHARGES}</span>
+            </div>
+
+            <div class="shop-actions">
+              <button
+                type="button"
+                class="shop-button"
+                data-shop-action="restock-emergency"
+                ${state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES || state.coins < EMERGENCY_HARVEST_COST ? 'disabled' : ''}
+              >
+                ${state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES ? 'Ready' : `Restock (${EMERGENCY_HARVEST_COST})`}
+              </button>
+            </div>
+          </div>
+
+          ${Object.entries(MARKET_LOCATIONS).filter(([, location]) => location.unlockCost > 0).map(([locationKey, location]) => `
+            <div class="shop-row">
+              <div class="shop-row-header">
+                <div class="sale-row-label">
+                  <span aria-hidden="true">🏪</span>
+                  <span>${location.label} market</span>
+                </div>
+                <span class="shop-level-tag">${isMarketUnlocked(locationKey) ? 'Open' : 'Locked'}</span>
+              </div>
+
+              <div class="shop-actions">
+                ${isMarketUnlocked(locationKey) ? '<span class="shop-maxed">Unlocked</span>' : `
+                  <button
+                    type="button"
+                    class="shop-button secondary"
+                    data-shop-action="unlock-market"
+                    data-shop-market="${locationKey}"
+                    ${state.coins < location.unlockCost ? 'disabled' : ''}
+                  >
+                    Unlock (${location.unlockCost})
+                  </button>
+                `}
+              </div>
+            </div>
+          `).join('')}
+
           ${CROP_KEYS.map((cropKey) => {
             const config = getCropSeedConfig(cropKey);
             const currentLevel = getCropSeedLevel(cropKey);
@@ -1518,18 +1528,16 @@ function renderShopPanel() {
 }
 
 function canStartSelling() {
-  const profile = getMarketLocationProfile();
-  const selectedTotal = CROP_KEYS.reduce((total, cropKey) => total + Number(state.market.selectedQuantities[cropKey] ?? 0), 0);
-  const hasAnySelected = selectedTotal > 0;
-  const hasEnoughCoins = state.coins >= (profile.entryFee ?? 0);
-  return hasAnySelected && hasEnoughCoins;
+  return !state.market.simulating && getSellingBlocker() === null;
 }
 
 function renderMarketPanel() {
   const crop = state.market.crop || 'tomato';
   const profile = getMarketLocationProfile();
-  const marketTableCount = profile.label === 'Village' ? 2 : profile.label === 'Town' ? 3 : 4;
-  const availableCrops = CROP_KEYS.filter((item) => ((state.inventory[item] ?? 0) > 0 || (state.cropInventory[item] ?? 0) > 0));
+  const productPool = getMarketProductPool(state.market.location);
+  const harvestedCrops = CROP_KEYS.filter((item) => (state.cropInventory[item] ?? 0) > 0);
+  const variety = getVarietyCount(state.market.location);
+  const sellingBlocker = getSellingBlocker();
   const sellDisabled = state.market.simulating || !canStartSelling();
 
   return `
@@ -1545,17 +1553,20 @@ function renderMarketPanel() {
             <span>Location</span>
             <select id="market-location" ${state.market.simulating ? 'disabled' : ''}>
               ${Object.entries(MARKET_LOCATIONS).map(([key, location]) => `
-                <option value="${key}" ${state.market.location === key ? 'selected' : ''}>${location.label}</option>
+                <option value="${key}" ${state.market.location === key ? 'selected' : ''} ${isMarketUnlocked(key) ? '' : 'disabled'}>
+                  ${location.label}${isMarketUnlocked(key) ? '' : ` (locked · ${location.unlockCost})`}
+                </option>
               `).join('')}
             </select>
           </label>
 
           <div class="market-inventory-list">
-            ${availableCrops.length
-              ? availableCrops.map((item) => {
-                  const quantity = Number(state.market.selectedQuantities[item] ?? 0);
-                  const price = Number(state.market.prices[item] ?? 5);
+            ${harvestedCrops.length
+              ? harvestedCrops.map((item) => {
+                  const price = Number(state.market.prices[item] ?? CROP_BASE_PRICES[item]);
                   const isActive = crop === item;
+                  const soldHere = productPool.includes(item);
+                  const buyerShare = Math.round(getBuyChance(price, CROP_BASE_PRICES[item]) * 100);
 
                   return `
                     <div class="sale-row market-crop-row ${isActive ? 'active' : ''}" data-market-crop-row="${item}">
@@ -1567,55 +1578,55 @@ function renderMarketPanel() {
                           </button>
                         </div>
                         <div class="market-crop-counts">
-                          <span class="market-crop-count">Seeds: ${state.inventory[item] ?? 0}</span>
-                          <span class="market-crop-count">Harvest: ${state.cropInventory[item] ?? 0}</span>
+                          <span class="market-crop-count">Harvest: ${state.cropInventory[item]}</span>
                         </div>
                       </div>
 
                       <div class="market-crop-controls">
-                        <div class="selector-row small-inline quantity-slider-row">
-                          <span class="quantity-slider-label">Qty</span>
-                          <input
-                            type="range"
-                            min="0"
-                            max="${Math.max(0, state.cropInventory[item] ?? 0)}"
-                            step="1"
-                            value="${quantity}"
-                            class="market-qty-slider"
-                            data-market-crop="${item}"
-                            data-market-action="qty-set"
-                            ${state.market.simulating ? 'disabled' : ''}
-                          >
-                          <strong data-market-quantity="${item}">${quantity}</strong>
-                        </div>
-
-                        <div class="selector-row small-inline">
-                          <button type="button" class="small-button" data-market-crop="${item}" data-market-action="price-dec" ${state.market.simulating ? 'disabled' : ''}>-</button>
-                          <span>Price: <strong>${price}</strong></span>
-                          <button type="button" class="small-button" data-market-crop="${item}" data-market-action="price-inc" ${state.market.simulating ? 'disabled' : ''}>+</button>
-                        </div>
+                        ${soldHere ? `
+                          <div class="selector-row small-inline">
+                            <button type="button" class="small-button" data-market-crop="${item}" data-market-action="price-dec" ${state.market.simulating ? 'disabled' : ''}>-</button>
+                            <span>Price: <strong>${price}</strong> · ~${buyerShare}% of buyers</span>
+                            <button type="button" class="small-button" data-market-crop="${item}" data-market-action="price-inc" ${state.market.simulating ? 'disabled' : ''}>+</button>
+                          </div>
+                        ` : `
+                          <p class="empty-sale">${profile.label} customers don't buy ${item}. It will spoil.</p>
+                        `}
                       </div>
                     </div>
                   `;
                 }).join('')
-              : '<p class="empty-sale">No seeds or harvested crops available.</p>'}
+              : '<p class="empty-sale">No harvested crops yet. Grow groups of 5+ or use Emergency.</p>'}
           </div>
 
           <div class="market-meta">
-            <span>Entry fee: ${profile.entryFee}</span>
+            <span>Variety: ${variety}/${profile.minVariety} crop types with ${MIN_UNITS_FOR_VARIETY}+ units</span>
             <span>Traffic: ${profile.trafficMin}-${profile.trafficMax}</span>
-            <span>AI rivals: ${profile.competitors}</span>
+            <span>All harvested crops are sold here; leftovers spoil.</span>
           </div>
 
           <button type="button" id="market-start-selling" class="sell-button" ${sellDisabled ? 'disabled' : ''}>Start Selling</button>
-          <p class="market-summary">${state.market.lastSummary}</p>
+          ${!state.market.simulating && !canSellAnywhere() ? `
+            <button type="button" id="market-skip-season" class="shop-button secondary" title="No unlocked market accepts this harvest">
+              Skip season (discard harvest and field)
+            </button>
+          ` : ''}
+          <p class="market-summary">${sellingBlocker && !state.market.simulating ? sellingBlocker : state.market.lastSummary}</p>
         </div>
       </div>
     </div>
   `;
 }
 
+const GAME_ENDINGS = {
+  won: { badge: '🏆', title: 'Millionaire!', button: 'Play again' },
+  died: { badge: '🪦', title: 'Game Over', button: 'Retry' },
+  bankrupt: { badge: '💸', title: 'Bankrupt', button: 'Retry' },
+};
+
 function renderGameOverScreen() {
+  const ending = GAME_ENDINGS[state.gameResult] ?? GAME_ENDINGS.bankrupt;
+
   return `
     <div class="sale-screen game-over-screen">
       <div class="sale-screen-panel game-over-panel">
@@ -1627,10 +1638,10 @@ function renderGameOverScreen() {
         </div>
 
         <div class="game-over-body">
-          <div class="game-over-badge">💸</div>
-          <h3 class="game-over-title">Game Over</h3>
-          <p class="game-over-message">${state.gameOverReason || 'You can no longer afford to harvest or enter the market.'}</p>
-          <button id="game-over-retry" type="button" class="sell-button game-over-button">Retry</button>
+          <div class="game-over-badge">${ending.badge}</div>
+          <h3 class="game-over-title">${ending.title}</h3>
+          <p class="game-over-message">${state.gameOverReason}</p>
+          <button id="game-over-retry" type="button" class="sell-button game-over-button">${ending.button}</button>
         </div>
       </div>
     </div>
@@ -1647,19 +1658,6 @@ function renderSaleSimulationScreen() {
   const skipButtonDisabled = state.market.simulating && !skipEnabled;
   const cinematicStart = activeEvent ? `${activeEvent.side === 'left' ? '-18%' : '118%'}` : '-18%';
   const cinematicEnd = activeEvent ? (activeEvent.table === 'you' ? 30 : 70) : 30;
-  const rivalPositions = [
-    { left: 70, top: 68 },
-    { left: 80, top: 56 },
-    { left: 88, top: 72 },
-  ];
-  const rivalTables = Array.from({ length: Math.max(1, profile.competitors ?? 1) }, (_, index) => {
-    const position = rivalPositions[index] ?? { left: Math.min(92, 68 + index * 8), top: 58 + (index % 2) * 18 };
-    return `
-      <div class="market-table rival-table" style="left:${position.left}%; top:${position.top}%">
-        <span class="table-label">Rival${Math.max(1, index + 1) === 1 ? '' : ` ${index + 1}`}</span>
-      </div>
-    `;
-  }).join('');
 
   return `
     <div class="sale-screen">
@@ -1676,7 +1674,6 @@ function renderSaleSimulationScreen() {
             <div class="market-table our-table" style="left:30%; top:62%">
               <span class="table-label">You</span>
             </div>
-            ${rivalTables}
             ${visibleEvents.map((event, index) => {
               const isPlayerCustomer = event.table === 'you';
               const startX = event.side === 'left' ? cinematicStart : (event.side === 'right' ? '118%' : '-18%');
@@ -1709,8 +1706,8 @@ function renderSaleSimulationScreen() {
             <div class="sale-report">
               <div class="sale-report-header">
                 <span>Seller</span>
-                <span>Customers</span>
-                <span>Requested</span>
+                <span title="Customers who wanted a crop you brought">Wanted</span>
+                <span title="Customers who reached your stall while that crop was in stock">Served</span>
                 <span>Sold</span>
                 <span>Revenue</span>
               </div>
@@ -1718,8 +1715,8 @@ function renderSaleSimulationScreen() {
                 <div class="sale-report-seller">
                   <div class="sale-report-row">
                     <span>${seller.name}</span>
-                    <span>${seller.customers}</span>
                     <span>${seller.requested}</span>
+                    <span>${seller.customers}</span>
                     <span>${seller.sold}</span>
                     <span>+$${seller.revenue}</span>
                   </div>
@@ -1751,13 +1748,7 @@ function renderSaleSimulationScreen() {
                   ` : ''}
                 </div>
               `).join('')}
-              <div class="sale-report-total">
-                <span>Total</span>
-                <span>${report.totalCustomers}</span>
-                <span>${report.totalRequested}</span>
-                <span>${report.totalSold}</span>
-                <span>+$${report.totalRevenue}</span>
-              </div>
+              <p class="market-summary">${report.totalCustomers} customers visited the ${profile.label} market; ${report.totalRequested} wanted a crop you brought.</p>
             </div>
             <button type="button" id="sale-screen-continue" class="sell-button">Continue</button>
           ` : ''}
@@ -1809,7 +1800,8 @@ function render() {
         <div class="hud">
           <div class="stat"><span>Round</span><strong>${state.round}</strong></div>
           <div class="stat"><span>Season</span><strong>${state.season}</strong></div>
-          <div class="stat"><span>Coins</span><strong>${state.coins}</strong></div>
+          <div class="stat"><span>Age</span><strong>${state.age}</strong></div>
+          <div class="stat" title="Reach ${GOAL_COINS.toLocaleString('en-US')} coins before age ${DEATH_AGE}"><span>Coins / Goal</span><strong>${state.coins.toLocaleString('en-US')} / 1M</strong></div>
         </div>
       </header>
 
@@ -1817,7 +1809,7 @@ function render() {
         <section class="panel board-panel ${state.marketOpen ? 'market-open' : ''}">
           <div class="section-title-row">
             <h2>Farm Board</h2>
-            <button id="harvest-button" type="button" class="harvest-button" ${state.coins < 5 ? 'disabled' : ''}>Harvest (-5)</button>
+            ${state.harvestFeedback ? `<span class="harvest-feedback">${state.harvestFeedback}</span>` : ''}
           </div>
           ${renderBoard()}
 
@@ -1854,6 +1846,7 @@ function render() {
 
     ${renderMarketPanel()}
     ${renderShopPanel()}
+    ${renderEmergencyButton()}
     ${renderDragGhost()}
   `;
 
@@ -1880,55 +1873,23 @@ function bindInteractions() {
       return;
     }
 
-    if (state.gameOver) {
-      return;
-    }
-
-    if (state.marketOpen) {
-      return;
-    }
-
-    const cell = event.target.closest('.board-cell');
-    if (!cell) {
-      return;
-    }
-
-    const row = Number(cell.dataset.row);
-    const col = Number(cell.dataset.col);
-    const crop = state.grid[row][col];
-
-    if (!crop) {
-      state.highlightedGroup = [];
-      render();
-      return;
-    }
-
-    state.highlightedGroup = findConnectedGroup(state.grid, row, col);
-    render();
-  });
-
-  app.addEventListener('dblclick', (event) => {
-    if (state.marketOpen) {
-      return;
-    }
-
-    const cell = event.target.closest('.board-cell');
-    if (!cell) {
-      return;
-    }
-
-    if (state.highlightedGroup.length > 0) {
-      harvestSelectedGroup();
-    }
   });
 
   app.addEventListener('click', (event) => {
-    const button = event.target.closest('#harvest-button');
-    if (button) {
-      if (state.marketOpen) {
-        return;
+    const emergencyButton = event.target.closest('#emergency-harvest-button');
+    if (emergencyButton) {
+      if (!state.marketOpen && !state.shopOpen) {
+        emergencyHarvest();
       }
-      harvestSelectedGroup();
+      return;
+    }
+
+    const handNextButton = event.target.closest('#hand-next-button');
+    if (handNextButton) {
+      if (!state.marketOpen) {
+        swapHandBlocks();
+      }
+      return;
     }
 
     const marketToggle = event.target.closest('#market-toggle');
@@ -1981,6 +1942,14 @@ function bindInteractions() {
       if (action === 'upgrade-crop') {
         upgradeCrop(cropKey);
       }
+
+      if (action === 'restock-emergency') {
+        restockEmergencyHarvest();
+      }
+
+      if (action === 'unlock-market') {
+        unlockMarket(shopAction.dataset.shopMarket);
+      }
       return;
     }
 
@@ -1996,22 +1965,21 @@ function bindInteractions() {
 
       if (simulation && selectedCrops.length > 0) {
         state.market.skipAnimation = true;
-        finalizeMarketSimulation(profile, simulation, selectedCrops);
+        finalizeMarketSimulation(profile, simulation);
       }
       return;
     }
 
     const saleScreenContinue = event.target.closest('#sale-screen-continue');
     if (saleScreenContinue) {
-      clearBoardForReturn();
-      state.market.saleScreenOpen = false;
-      state.market.saleComplete = false;
-      state.market.simulating = false;
-      state.market.activeSimulation = null;
-      state.market.activeSelectedCrops = [];
-      state.market.skipAnimationEnabledAt = 0;
-      state.shopOpen = true;
+      startNextSeason();
       render();
+      return;
+    }
+
+    const skipSeasonButton = event.target.closest('#market-skip-season');
+    if (skipSeasonButton) {
+      skipSeason();
       return;
     }
   });
@@ -2040,25 +2008,6 @@ function bindInteractions() {
     }
   });
 
-  app.addEventListener('input', (event) => {
-    if (state.market.simulating) {
-      return;
-    }
-
-    const quantitySlider = event.target.closest('[data-market-action="qty-set"]');
-    if (!quantitySlider) {
-      return;
-    }
-
-    const cropKey = quantitySlider.dataset.marketCrop || state.market.crop;
-    setMarketQuantity(quantitySlider.value, cropKey, false);
-    const quantityValue = quantitySlider.closest('.quantity-slider-row')
-      ?.querySelector('[data-market-quantity]');
-    if (quantityValue) {
-      quantityValue.textContent = String(state.market.selectedQuantities[cropKey]);
-    }
-  });
-
   app.addEventListener('click', (event) => {
     if (state.market.simulating) {
       return;
@@ -2067,7 +2016,6 @@ function bindInteractions() {
     const cropButton = event.target.closest('[data-market-crop]');
     if (cropButton && event.target.closest('.market-crop-select')) {
       state.market.crop = cropButton.dataset.marketCrop;
-      clampMarketQuantity(state.market.crop);
       render();
       return;
     }
@@ -2079,21 +2027,6 @@ function bindInteractions() {
 
     const action = actionButton.dataset.marketAction;
     const cropKey = actionButton.dataset.marketCrop || state.market.crop;
-
-    if (action === 'qty-dec') {
-      state.market.crop = cropKey;
-      adjustMarketQuantity(-1, cropKey);
-    }
-
-    if (action === 'qty-inc') {
-      state.market.crop = cropKey;
-      adjustMarketQuantity(1, cropKey);
-    }
-
-    if (action === 'qty-set') {
-      state.market.crop = cropKey;
-      setMarketQuantity(actionButton.value, cropKey);
-    }
 
     if (action === 'price-dec') {
       state.market.crop = cropKey;
@@ -2159,14 +2092,33 @@ function bindInteractions() {
 }
 
 export {
+  advanceHand,
+  advanceTime,
+  autoHarvest,
   buildMarketCustomerSimulation,
+  buySeedPack,
   checkForGameOver,
+  createHandState,
   createInitialGameState,
   createMarketState,
+  emergencyHarvest,
   finalizeMarketSimulation,
+  getBuyChance,
+  getCalendar,
+  getHarvestYield,
+  getMarketLocationProfile,
+  getUpgradeCost,
+  getVarietyCount,
   render,
-  setMarketQuantity,
+  restockEmergencyHarvest,
+  skipSeason,
+  startNextSeason,
+  startSelling,
   state,
+  swapHandBlocks,
+  unlockCrop,
+  unlockMarket,
+  upgradeCrop,
 };
 
 if (typeof document !== 'undefined' && document.getElementById('app')) {

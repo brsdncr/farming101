@@ -56,6 +56,9 @@ globalThis.document = {
   addEventListener() {},
 };
 
+// render() restores the shop's scroll position on the next frame.
+globalThis.requestAnimationFrame = (callback) => setTimeout(callback, 0);
+
 const app = await import('../../app.js');
 
 export { app, appElement };
