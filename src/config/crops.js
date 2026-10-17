@@ -39,14 +39,14 @@ export const CROP_COLORS = {
 // Per-crop economy: tomato and carrot are cheap starters; later crops cost much more to unlock
 // and to seed, but sell for far more.
 const CROP_ECONOMY = {
-  tomato: { price: 8, unlockCost: 0, seedPackCost: 10 },
-  carrot: { price: 6, unlockCost: 0, seedPackCost: 10 },
-  pumpkin: { price: 14, unlockCost: 250, seedPackCost: 30 },
-  beetroot: { price: 16, unlockCost: 400, seedPackCost: 40 },
-  onion: { price: 35, unlockCost: 1500, seedPackCost: 100 },
-  cherry: { price: 60, unlockCost: 3000, seedPackCost: 150 },
-  eggplant: { price: 120, unlockCost: 10000, seedPackCost: 300 },
-  watermelon: { price: 200, unlockCost: 20000, seedPackCost: 500 },
+  tomato: { price: 11, unlockCost: 0, seedPackCost: 10 },
+  carrot: { price: 8, unlockCost: 0, seedPackCost: 10 },
+  pumpkin: { price: 20, unlockCost: 250, seedPackCost: 30 },
+  beetroot: { price: 22, unlockCost: 400, seedPackCost: 40 },
+  onion: { price: 49, unlockCost: 1500, seedPackCost: 100 },
+  cherry: { price: 84, unlockCost: 3000, seedPackCost: 150 },
+  eggplant: { price: 168, unlockCost: 10000, seedPackCost: 300 },
+  watermelon: { price: 280, unlockCost: 20000, seedPackCost: 500 },
 };
 
 export const CROP_BASE_PRICES = Object.fromEntries(CROP_KEYS.map((cropKey) => [cropKey, CROP_ECONOMY[cropKey].price]));
@@ -99,8 +99,11 @@ export const COMBO_STEP_BONUS = 0.1;
 export const COMBO_MAX_MULTIPLIER = 2;
 
 // The emergency harvest clears the whole field; the player holds at most one and restocks it in the shop.
+// Restocking costs EMERGENCY_HARVEST_COST_SHARE of the player's coins, at least EMERGENCY_HARVEST_COST,
+// so it stays a cheap rescue early on but remains a real decision for a rich player.
 export const EMERGENCY_HARVEST_MAX_CHARGES = 1;
 export const EMERGENCY_HARVEST_COST = 50;
+export const EMERGENCY_HARVEST_COST_SHARE = 0.02;
 
 export const MARKET_DEMAND_WEIGHTS = {
   village: { tomato: 5, carrot: 4, pumpkin: 1, beetroot: 1 },

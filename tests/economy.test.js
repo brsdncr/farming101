@@ -118,6 +118,18 @@ test('emergency harvest is restocked in the shop for coins, holding at most one'
   assert.equal(app.state.emergencyHarvests, 0);
 });
 
+test('emergency restock costs the larger of 50 coins or 2% of coins', () => {
+  Object.assign(app.state, app.createInitialGameState());
+
+  assert.equal(app.getEmergencyRestockCost(1_000), 50);
+  assert.equal(app.getEmergencyRestockCost(100_000), 2_000);
+
+  app.state.emergencyHarvests = 0;
+  app.state.coins = 100_000;
+  assert.equal(app.restockEmergencyHarvest(), true);
+  assert.equal(app.state.coins, 98_000);
+});
+
 test('hand slots never show more seeds than the inventory holds', () => {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const inventory = { ...emptyInventory(), tomato: 3, carrot: 2 };

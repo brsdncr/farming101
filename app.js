@@ -8,6 +8,7 @@ import {
   CROP_KEYS,
   CROP_SEED_CONFIG,
   EMERGENCY_HARVEST_COST,
+  EMERGENCY_HARVEST_COST_SHARE,
   EMERGENCY_HARVEST_MAX_CHARGES,
   HARVEST_SIZE_BONUSES,
   MARKET_BASE_BUY_RATE,
@@ -1172,12 +1173,17 @@ function emergencyHarvest() {
   scheduleHarvestFlashClear();
 }
 
+function getEmergencyRestockCost(coins = state.coins) {
+  return Math.max(EMERGENCY_HARVEST_COST, Math.round(coins * EMERGENCY_HARVEST_COST_SHARE));
+}
+
 function restockEmergencyHarvest() {
-  if (state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES || state.coins < EMERGENCY_HARVEST_COST) {
+  const cost = getEmergencyRestockCost();
+  if (state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES || state.coins < cost) {
     return false;
   }
 
-  state.coins -= EMERGENCY_HARVEST_COST;
+  state.coins -= cost;
   state.emergencyHarvests += 1;
   state.shopFeedback = { message: 'Emergency harvest restocked', kind: 'success' };
   render();
@@ -1582,9 +1588,10 @@ function renderShopPanel() {
                 type="button"
                 class="shop-button"
                 data-shop-action="restock-emergency"
-                ${state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES || state.coins < EMERGENCY_HARVEST_COST ? 'disabled' : ''}
+                ${state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES || state.coins < getEmergencyRestockCost() ? 'disabled' : ''}
+                title="Costs ${Math.round(EMERGENCY_HARVEST_COST_SHARE * 100)}% of your coins (at least ${EMERGENCY_HARVEST_COST})"
               >
-                ${state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES ? 'Ready' : `Restock (${EMERGENCY_HARVEST_COST})`}
+                ${state.emergencyHarvests >= EMERGENCY_HARVEST_MAX_CHARGES ? 'Ready' : `Restock (${getEmergencyRestockCost().toLocaleString('en-US')})`}
               </button>
             </div>
           </div>
@@ -2333,6 +2340,7 @@ export {
   finalizeMarketSimulation,
   getBuyChance,
   getCalendar,
+  getEmergencyRestockCost,
   getHarvestYield,
   getMarketLocationProfile,
   getUpgradeCost,

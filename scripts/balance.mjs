@@ -10,7 +10,6 @@ import {
   CROP_BASE_PRICES,
   CROP_KEYS,
   CROP_SEED_CONFIG,
-  EMERGENCY_HARVEST_COST,
   MARKET_DEMAND_WEIGHTS,
   MARKET_LOCATIONS,
 } from '../src/config/crops.js';
@@ -157,7 +156,7 @@ function plantVisit(stats) {
 
     if (!move) {
       // Field clogged with seeds still in hand: use the joker if there is something to save.
-      if (state.emergencyHarvests > 0 && fieldCropValue() > EMERGENCY_HARVEST_COST && (current?.cells?.length || next?.cells?.length)) {
+      if (state.emergencyHarvests > 0 && fieldCropValue() > app.getEmergencyRestockCost() && (current?.cells?.length || next?.cells?.length)) {
         app.emergencyHarvest();
         stats.emergencies += 1;
         continue;
@@ -173,7 +172,7 @@ function plantVisit(stats) {
   // Salvage the leftover field when no market would accept the harvest, or when it is worth
   // more than restocking the emergency harvest.
   if (state.emergencyHarvests > 0 && fieldCropValue() > 0
-    && (sellableMarkets().length === 0 || fieldCropValue() > EMERGENCY_HARVEST_COST * 1.5)) {
+    && (sellableMarkets().length === 0 || fieldCropValue() > app.getEmergencyRestockCost() * 1.5)) {
     app.emergencyHarvest();
     stats.emergencies += 1;
   }
@@ -353,7 +352,7 @@ function shop(stats) {
     }
   }
 
-  if (state.emergencyHarvests === 0 && state.coins >= EMERGENCY_HARVEST_COST * 4) {
+  if (state.emergencyHarvests === 0 && state.coins >= app.getEmergencyRestockCost() * 4) {
     app.restockEmergencyHarvest();
   }
 

@@ -86,14 +86,14 @@ Tomato and Carrot are the cheap starter crops and are unlocked from the start. A
 
 | Crop | Base Price | Unlock Cost | Seed Pack (10 seeds) |
 | ----- | ----- | ----- | ----- |
-| **Tomato** | 8 | Free | 10 |
-| **Carrot** | 6 | Free | 10 |
-| **Pumpkin** | 14 | 250 | 30 |
-| **Beetroot** | 16 | 400 | 40 |
-| **Onion** | 35 | 1,500 | 100 |
-| **Cherry** | 60 | 3,000 | 150 |
-| **Eggplant** | 120 | 10,000 | 300 |
-| **Watermelon** | 200 | 20,000 | 500 |
+| **Tomato** | 11 | Free | 10 |
+| **Carrot** | 8 | Free | 10 |
+| **Pumpkin** | 20 | 250 | 30 |
+| **Beetroot** | 22 | 400 | 40 |
+| **Onion** | 49 | 1,500 | 100 |
+| **Cherry** | 84 | 3,000 | 150 |
+| **Eggplant** | 168 | 10,000 | 300 |
+| **Watermelon** | 280 | 20,000 | 500 |
 
 * A crop being **defined** in the game is distinct from it being **unlocked** for the player. Locked crops cannot be bought as seeds.
 
@@ -157,7 +157,7 @@ A one-shot joker for a field clogged with groups too small to auto-harvest.
 
 * It is disabled while the field is empty.
 
-* **Restock:** 50 coins in the Shop.
+* **Restock:** In the Shop, for **2% of the player's coins, at least 50**. It stays a cheap rescue early on but remains a real decision for a rich player (e.g. 2,469 coins at 123,456 coins).
 
 ### 5.3 End of Season
 
@@ -200,7 +200,7 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 
   * Crops the selected market does not buy are marked as spoiling.
 
-* **Price:** Adjust each crop's unit price with − / +. The panel shows the expected share of buyers at that price (e.g. "Price: 9 · ~59% of buyers").
+* **Price:** Adjust each crop's unit price with − / +. The panel shows the expected share of buyers at that price (e.g. "Price: 13 · ~53% of buyers" for Tomato, base price 11).
 
 * **Status:** The panel shows variety progress (e.g. "Variety: 2/2 crop types with 3+ units"), customer traffic, and why selling is blocked, if it is.
 
@@ -266,7 +266,7 @@ Game endings are evaluated on the main screen, after the sale summary has been c
 
 Opens after each market visit (or skipped season).
 
-* **Emergency Harvest:** Restock the single charge (50 coins).
+* **Emergency Harvest:** Restock the single charge (2% of coins, at least 50).
 
 * **Markets:** Unlock Town (2,000) and City (25,000).
 
@@ -308,14 +308,16 @@ The economy is tuned with a headless simulation that plays whole careers with th
 
 | Tiles per Visit | 40 | 60 | 100 | 160 |
 | ----- | ----- | ----- | ----- | ----- |
-| **Reached 1,000,000** | 25/30 | 29/30 | 30/30 | 30/30 |
-| **Median Age at 1,000,000** | 83 | 65 | 54 | 52 |
+| **Reached 1,000,000** | 1/40 | 40/40 | 40/40 | 39/40 |
+| **Median Age at 1,000,000** | 84 | 62 | 55 | 54 |
 
-* Town is typically unlocked around age 24 and City around age 30–33.
+* Town is typically unlocked around age 22 and City around age 26–29.
 
-* Returns diminish above roughly 110 tiles per visit, because the field clogs faster than groups clear.
+* Returns diminish above roughly 75 tiles per visit, because the field clogs faster than groups clear. Emergency is the main way to clear a clogged field; with its price at 2% of coins the bot uses it on about 60% of visits.
 
-* An engaged run is about 140 visits of around 25 placements each.
+* Very light play (about 40 tiles per visit) rarely reaches a million.
+
+* An engaged run is about 140 visits of around 18 placements each.
 
 * The bot looks only one move ahead, so it still harvests mostly at exactly 5 tiles; the size bonus mainly raises the ceiling for players who plan bigger groups.
 
@@ -333,7 +335,7 @@ Planned to occur automatically on a regular cycle. Examples:
 
 ### 11.2 Open Design Questions
 
-* **Emergency harvest is nearly free late in the game.** The simulation uses it on almost every visit because 50 coins is negligible once income is in the thousands. Options: scale its price with income, raise it, or add a cooldown.
+* **Emergency harvest is load-bearing.** Its price now scales with wealth (2% of coins), but the simulation shows it is still the main way to clear a field clogged with small groups, so a higher price mostly shortens visits. Fixing the clogging itself (e.g. a seed bag, see the variety question below) would let Emergency become a true rescue.
 
 * **City's 4-type variety minimum is hard for light players.** Because tetrominoes mix all seed types at random, minor crops rarely form groups of 5. Options: let the player choose which seeds go into tetrominoes, lower City's minimum to 3, or relax how variety is counted.
 

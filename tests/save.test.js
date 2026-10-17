@@ -36,7 +36,7 @@ test('restoring fills fields missing from older saves with defaults and rejects 
   const restored = restoreGame(save, app.createInitialGameState());
 
   assert.equal(restored.combo, 0);
-  assert.equal(restored.market.prices.tomato, 8);
+  assert.equal(restored.market.prices.tomato, app.createMarketState().prices.tomato);
   assert.equal(restoreGame({ ...save, version: 999 }, app.createInitialGameState()), null);
   assert.equal(restoreGame(null, app.createInitialGameState()), null);
 });
