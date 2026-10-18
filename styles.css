@@ -1467,8 +1467,13 @@ h1 {
   display: grid;
   /* Next is only a preview, so its tray is narrower than Current's. */
   grid-template-columns: minmax(80px, 1fr) auto minmax(80px, 0.72fr);
-  align-items: center;
+  /* Trays line up at the top; the swap button stays centred between them. */
+  align-items: start;
   gap: 10px;
+}
+
+.hand-grid > .swap-button {
+  align-self: center;
 }
 
 /* Hand cards are wooden trays, as in the prototype. */
