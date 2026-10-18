@@ -10,6 +10,8 @@
   /* Field size: grows with the window height, leaving room for the top bar and the hand, so the
      farm screen never needs to scroll. Hand blocks are sized from it (see .mini-grid). */
   --board-size: clamp(240px, calc((100vh - 265px) / 1.5), 520px);
+  /* The "Farm Board" title row has a fixed height, so the inventory can line up with the field. */
+  --board-title-height: 32px;
 
   /* Ink and text */
   --ink: #3a2414;          /* outlines and the strongest text */
@@ -191,7 +193,7 @@ h1 {
 
 .game-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 290px;
+  grid-template-columns: minmax(0, 1fr) 340px;
   gap: 18px;
   align-items: start;
 }
@@ -226,6 +228,8 @@ h1 {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  height: var(--board-title-height);
   margin-bottom: 12px;
 }
 
@@ -308,7 +312,7 @@ h1 {
 .inventory-emoji {
   display: grid;
   place-items: center;
-  font-size: 1rem;
+  font-size: clamp(0.8rem, calc(var(--inventory-row) * 0.62), 1.2rem);
   line-height: 1;
   text-align: center;
   margin: 0;
@@ -357,11 +361,27 @@ h1 {
   border-color: var(--danger);
 }
 
+/* Right column: the inventory, then active contracts below it (beside the hand). */
+.side-column {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  align-self: start;
+  min-width: 0;
+}
+
+/* The inventory spans exactly the field: it starts below the field's title row (its height, the row's
+   margin and the board panel's gap) and is as tall as the field. Its rows share that height; on very
+   short windows the panel scrolls instead of squeezing them further. */
 .sidebar {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  align-self: start;
+  height: var(--board-size);
+  margin-top: calc(var(--board-title-height) + 12px + 16px);
+  overflow-y: auto;
+  /* About the height of one inventory row at this field size. */
+  --inventory-row: calc((var(--board-size) - 190px) / 8);
 }
 
 .inventory-list {
@@ -369,7 +389,9 @@ h1 {
   padding: 0;
   margin: 0;
   display: grid;
-  gap: 4px;
+  grid-auto-rows: minmax(21px, 1fr);
+  gap: 6px;
+  flex: 1 0 auto;
 }
 
 .inventory-list li {
@@ -378,9 +400,9 @@ h1 {
   align-items: center;
   gap: 6px;
   background: rgba(234, 198, 144, 0.35);
-  padding: 4px 8px;
-  border-radius: 10px;
-  font-size: 0.82rem;
+  padding: 0 10px;
+  border-radius: 12px;
+  font-size: clamp(0.75rem, calc(var(--inventory-row) * 0.5), 1rem);
 }
 
 .inventory-count {
@@ -414,10 +436,10 @@ h1 {
 .inventory-swatch {
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  width: clamp(16px, calc(var(--inventory-row) - 4px), 28px);
+  height: clamp(16px, calc(var(--inventory-row) - 4px), 28px);
   background: var(--soil);
-  border-radius: 5px;
+  border-radius: 7px;
   padding: 2px;
   overflow: hidden;
   flex-shrink: 0;
@@ -521,6 +543,23 @@ h1 {
   border-radius: 50%;
   font-size: 1.2rem;
   line-height: 1;
+}
+
+/* Drawn button icons (menu, close) sit exactly in the middle of their round button. */
+.menu-button,
+.close-button {
+  display: grid;
+  place-items: center;
+}
+
+.button-icon {
+  display: block;
+  width: 55%;
+  height: 55%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
 }
 
 .market-inventory-list {
@@ -968,153 +1007,304 @@ h1 {
   box-shadow: inset 0 0 0 3px var(--rim);
 }
 
-.market-table {
+/* The market day: a striped stall in the middle of a street, customers walking past. */
+.market-sim-stage {
+  height: clamp(220px, 34vh, 300px);
+}
+
+.sale-street {
   position: absolute;
-  width: 58px;
-  height: 58px;
-  border-radius: 50%;
-  border: 3px solid var(--wood-border);
-  background: var(--wood);
-  box-shadow: inset 0 0 0 4px var(--wood-light), 0 4px 0 var(--wood-border);
-  display: grid;
-  place-items: center;
-  transform: translate(-50%, -50%);
+  left: 0;
+  right: 0;
+  top: 58%;
+  bottom: 0;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 46px, rgba(145, 85, 33, 0.12) 46px 50px),
+    linear-gradient(180deg, var(--cream-3), var(--cream-2));
+  border-top: 3px solid var(--wood-border);
 }
 
-.market-table.our-table {
-  background: var(--wood);
-}
-
-.market-table.rival-table {
-  background: rgba(255, 166, 77, 0.1);
-  border-color: rgba(255, 166, 77, 0.45);
-  box-shadow: inset 0 0 0 2px rgba(255, 166, 77, 0.2);
-}
-
-.table-label {
+.sale-hud {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
   display: flex;
-  align-items: center;
+  justify-content: space-between;
+  z-index: 200;
+  pointer-events: none;
+}
+
+.sale-hud-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--cream);
+  border: 2px solid var(--wood-border);
+  box-shadow: 0 3px 0 var(--wood-border);
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sale-stall {
+  position: absolute;
+  left: 50%;
+  top: 20%;
+  width: min(52%, 300px);
+  transform: translateX(-50%);
+  z-index: 50;
+}
+
+/* Two posts hold the awning above the counter. */
+.sale-stall::before,
+.sale-stall::after {
+  content: '';
+  position: absolute;
+  top: 20px;
+  width: 8px;
+  height: 22px;
+  background: var(--wood-dark);
+  border: 2px solid var(--wood-border);
+  border-radius: 3px;
+}
+
+.sale-stall::before {
+  left: 18px;
+}
+
+.sale-stall::after {
+  right: 18px;
+}
+
+.sale-stall-awning {
+  height: 26px;
+  border: 3px solid var(--wood-border);
+  border-radius: 12px 12px 4px 4px;
+  background: repeating-linear-gradient(90deg, var(--roof) 0 22px, var(--cream) 22px 44px);
+  box-shadow: 0 4px 0 rgba(58, 36, 20, 0.2);
+}
+
+.sale-stall-counter {
+  display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  width: 100%;
-  height: 100%;
+  gap: 4px 10px;
+  margin: 12px 8px 0;
+  padding: 6px 8px;
+  min-height: 44px;
+  border: 3px solid var(--wood-border);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--wood-light), var(--wood));
+  box-shadow: inset 0 -4px 0 var(--wood-dark);
+}
+
+.stall-crop {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 1.5rem;
   line-height: 1;
-  font-size: 0.55rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  text-align: center;
+  transition: opacity 0.3s, filter 0.3s;
+}
+
+.stall-crop b {
+  font-size: 0.9rem;
   color: #fff;
   -webkit-text-stroke: 3px var(--ink);
   paint-order: stroke fill;
+  font-variant-numeric: tabular-nums;
 }
 
-.customer {
+.stall-crop.sold-out {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+
+/* On phones the stall gets wider and its crops smaller, so six crops still fit on one row. */
+@media (max-width: 560px) {
+  .sale-stall {
+    width: 80%;
+  }
+
+  .sale-stall-counter {
+    gap: 2px 6px;
+  }
+
+  .stall-crop {
+    font-size: 1.05rem;
+  }
+
+  .stall-crop b {
+    font-size: 0.72rem;
+  }
+}
+
+.sale-crowd {
   position: absolute;
-  width: 20px;
-  height: 20px;
-  left: var(--start-x);
-  border-radius: 50%;
-  border: 2px solid var(--ink);
-  background: linear-gradient(180deg, #ffd0d8, #f49aa9);
-  box-shadow: 0 4px 0 rgba(58, 36, 20, 0.25);
-  animation: customerWalk 3.6s cubic-bezier(0.2, 0.7, 0.2, 1) infinite alternate;
-  animation-play-state: paused;
-  opacity: 0;
+  inset: 0;
+  pointer-events: none;
 }
 
-.purchase-emoji {
+/* A walker's feet are at its position; --bob lifts it while walking. */
+.walker {
+  position: absolute;
+  transform: translate(-50%, calc(-100% + var(--bob, 0px)));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.walker-body {
+  font-size: 1.7rem;
+  line-height: 1;
+  filter: drop-shadow(0 3px 0 rgba(58, 36, 20, 0.25));
+}
+
+.walker-back {
+  z-index: 10 !important;
+  opacity: 0.85;
+}
+
+.walker-back .walker-body {
+  font-size: 1.25rem;
+}
+
+.walker-bubble {
+  margin-bottom: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: #fff;
+  border: 2px solid var(--ink);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.walker-bubble:empty {
+  display: none;
+}
+
+.walker.talking .walker-bubble {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.walker-bought .walker-bubble {
+  background: #eaf6c8;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.walker-passed .walker-bubble,
+.walker-soldout .walker-bubble {
+  background: #ffe1dc;
+}
+
+.walker-passerby .walker-bubble {
+  border-style: dashed;
+  font-size: 0.85rem;
+}
+
+.sale-closed-banner {
   position: absolute;
   left: 50%;
-  top: -18px;
-  transform: translateX(-50%);
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--cream);
-  border: 2px solid var(--wood-border);
-  font-size: 0.9rem;
-  line-height: 1;
-  opacity: 0;
-  animation: purchaseEmoji 1.6s ease-out forwards;
-}
-
-.market-sim-stage.running .customer {
-  animation-play-state: running;
-  opacity: 1;
-}
-
-.customer.from-right {
-  background: linear-gradient(180deg, #fff1c2, #f6c47c);
-}
-
-.float-gain {
-  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(-3deg);
+  z-index: 300;
+  padding: 8px 18px;
+  border-radius: 16px;
+  background: var(--highlight);
+  border: 3px solid var(--ink);
+  box-shadow: 0 5px 0 var(--ink);
   color: #fff;
-  font-size: 0.95rem;
+  font-size: 1.2rem;
   font-weight: 700;
   -webkit-text-stroke: 4px var(--ink);
   paint-order: stroke fill;
-  transform: translate(-50%, 0);
-  opacity: 0;
-  animation: floatCoin 1.8s ease-out forwards;
+  white-space: nowrap;
+  animation: closed-banner-pop 0.35s ease-out;
+}
+
+@keyframes closed-banner-pop {
+  0% { transform: translate(-50%, -50%) rotate(-3deg) scale(0.4); }
+  70% { transform: translate(-50%, -50%) rotate(-3deg) scale(1.12); }
+  100% { transform: translate(-50%, -50%) rotate(-3deg) scale(1); }
+}
+
+.sale-day-controls {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+}
+
+.speed-button {
+  min-width: 84px;
+  background: linear-gradient(180deg, #a9dbe8 0%, #7fc4d6 60%, #5aa9bd 100%);
+  font-variant-numeric: tabular-nums;
+}
+
+.market-forecast {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.season-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
   white-space: nowrap;
 }
 
-@keyframes customerWalk {
-  0% {
-    left: var(--start-x);
-    top: var(--start-y);
-    transform: translateY(0) scale(0.82);
-    opacity: 0.7;
-  }
-  20% {
-    opacity: 1;
-  }
-  50% {
-    transform: translateY(-12px) scale(1.02);
-  }
-  100% {
-    left: var(--end-x);
-    top: var(--end-y);
-    transform: translateY(-18px) scale(1.18);
-    opacity: 1;
-  }
+.season-chip.in-season {
+  background: rgba(157, 191, 61, 0.28);
+  color: var(--accent);
 }
 
-@keyframes floatCoin {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, 0) scale(0.75);
-  }
-  18% {
-    opacity: 1;
-  }
-  50% {
-    transform: translate(-50%, -20px) scale(1.2);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, -38px) scale(1.4);
-  }
+.season-chip.off-season {
+  background: rgba(201, 235, 242, 0.8);
+  color: #3f7d8c;
 }
 
-@keyframes purchaseEmoji {
-  0% {
-    opacity: 0;
-    transform: translateX(-50%) translateY(16px) scale(0.75);
-  }
-  20% {
-    opacity: 1;
-  }
-  60% {
-    transform: translateX(-50%) translateY(-14px) scale(1.25);
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(-50%) translateY(-28px) scale(1.45);
-  }
+.market-flood {
+  margin: 0;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgba(240, 165, 49, 0.18);
+  color: var(--text);
+  font-size: 0.76rem;
+}
+
+.sale-tip.tip-flood {
+  background: rgba(240, 165, 49, 0.18);
+}
+
+.price-change {
+  color: var(--muted);
+  font-size: 0.8em;
+}
+
+.sale-tip {
+  margin: 0 0 4px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 0.74rem;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.sale-tip.tip-up {
+  background: rgba(157, 191, 61, 0.22);
+}
+
+.sale-tip.tip-down {
+  background: rgba(232, 65, 60, 0.12);
 }
 
 .market-meta {
@@ -1289,10 +1479,6 @@ h1 {
   color: var(--text);
 }
 
-.sale-gain {
-  font-size: 0.8rem;
-}
-
 .hand-section {
   display: flex;
   flex-direction: column;
@@ -1301,9 +1487,15 @@ h1 {
 
 .hand-grid {
   display: grid;
-  grid-template-columns: minmax(80px, 1fr) auto minmax(80px, 1fr);
-  align-items: center;
+  /* Next is only a preview, so its tray is narrower than Current's. */
+  grid-template-columns: minmax(80px, 1fr) auto minmax(80px, 0.72fr);
+  /* Trays line up at the top; the swap button stays centred between them. */
+  align-items: start;
   gap: 10px;
+}
+
+.hand-grid > .swap-button {
+  align-self: center;
 }
 
 /* Hand cards are wooden trays, as in the prototype. */
@@ -1360,6 +1552,10 @@ h1 {
 }
 
 .harvest-feedback {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   padding: 4px 12px;
   border-radius: 999px;
   background: var(--cream);
@@ -1503,10 +1699,6 @@ h1 {
 .contracts-panel {
   display: grid;
   gap: 8px;
-  padding: 10px 12px;
-  border-radius: 16px;
-  background: rgba(250, 222, 180, 0.55);
-  border: 2px solid var(--cream-3);
 }
 
 .contracts-panel h3 {
@@ -1525,7 +1717,7 @@ h1 {
 }
 
 .hand-grid.with-hold {
-  grid-template-columns: minmax(80px, 1fr) auto minmax(80px, 1fr) minmax(80px, 1fr);
+  grid-template-columns: minmax(80px, 1fr) auto minmax(80px, 0.72fr) minmax(80px, 1fr);
   /* Equal-height cards, since the Hold card also has a button. */
   align-items: stretch;
 }
@@ -1552,9 +1744,11 @@ h1 {
   cursor: default;
 }
 
-/* Next is a preview: its blocks are dimmed, the tray stays solid. */
+/* Next is a preview: its blocks are smaller and greyed out, the tray stays solid. */
 .tetromino-card.next-card .mini-grid {
-  opacity: 0.7;
+  max-width: calc((var(--board-size) * 0.5 - 24px) * 0.72);
+  opacity: 0.55;
+  filter: grayscale(0.75);
 }
 
 .tetromino-card.selected {
@@ -1635,6 +1829,12 @@ h1 {
 @media (max-width: 820px) {
   .game-layout {
     grid-template-columns: 1fr;
+  }
+
+  /* Stacked below the field, the inventory takes its natural height. */
+  .sidebar {
+    height: auto;
+    margin-top: 0;
   }
 
   .topbar {

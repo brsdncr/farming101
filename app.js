@@ -22,23 +22,36 @@ import {
   HARVEST_SIZE_BONUSES,
   MARKET_BASE_BUY_RATE,
   MARKET_DEMAND_WEIGHTS,
+  MARKET_FLOOD_FACTOR,
+  MARKET_FLOOD_MAX,
+  MARKET_FLOOD_RECOVERY,
   MARKET_LOCATIONS,
   MARKET_PRICE_SENSITIVITY,
+  MARKET_PRICE_STEP_SHARE,
   MIN_UNITS_FOR_VARIETY,
+  OFF_SEASON_PRICE_PENALTY,
+  SALE_DAY_MAX_MS,
+  SALE_DAY_MIN_MS,
+  SALE_DAY_MS_PER_CUSTOMER,
+  SALE_DAY_SPEEDS,
   SEED_LEVEL_YIELD_BONUS,
   SEED_UPGRADE_COST_FACTOR,
   SEED_UPGRADE_COST_GROWTH,
+  SEASON_PRICE_BONUS,
+  SEASONAL_CROPS,
 } from './src/config/crops.js';
 import {
   DEATH_AGE,
   GOAL_COINS,
   HOLD_SLOT_COST,
+  SEASON_EMOJIS,
   SEASONS,
   START_AGE,
   VISITS_PER_SEASON,
   VISITS_PER_YEAR,
 } from './src/config/game.js';
 import { SHAPE_DEFINITIONS, SHAPE_TYPES } from './src/config/shapes.js';
+import { buildSaleTimeline, formatDayClock, getSaleDaySnapshot, updateSaleStage } from './src/ui/saleDay.js';
 import {
   GRID_SIZE,
   canPlaceShape,
@@ -79,7 +92,11 @@ const uiState = {
   screen: 'game',
   confirmNewGame: false,
   shopCrop: null,
+  saleSpeed: SALE_DAY_SPEEDS[0],
 };
+// The market day being played on the sale screen (see src/ui/saleDay.js). Not saved: a sale that is
+// interrupted is settled from its saved result instead of being replayed.
+let saleDay = null;
 const dragState = {
   active: false,
   slotIndex: null,
@@ -484,13 +501,13 @@ function createMarketState(overrides = {}) {
     trafficMax: profile.trafficMax,
     prices: { ...CROP_BASE_PRICES },
     keep: {},
+    // Market memory: flood[locationKey][crop], see MARKET_FLOOD_FACTOR.
+    flood: {},
     pendingSale: [],
     lastSummary: 'No sales run yet.',
     simulating: false,
     saleScreenOpen: false,
     saleComplete: false,
-    simulationEvents: [],
-    currentCustomerIndex: -1,
     activeSimulation: null,
     activeSelectedCrops: [],
     skipAnimation: false,
@@ -538,6 +555,94 @@ function getBuyChance(price, basePrice) {
   const priceRatio = price / basePrice;
   const baseOdds = (1 - MARKET_BASE_BUY_RATE) / MARKET_BASE_BUY_RATE;
   return 1 / (1 + baseOdds * Math.exp(MARKET_PRICE_SENSITIVITY * (priceRatio - 1)));
+}
+
+// Customers the market normally has for a crop: its share of the average traffic.
+function getNormalDemand(locationKey, crop) {
+  const profile = MARKET_LOCATIONS[locationKey];
+  const weights = MARKET_DEMAND_WEIGHTS[locationKey] ?? {};
+  const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
+  const demandShare = totalWeight > 0 ? (weights[crop] ?? 0) / totalWeight : 0;
+  return ((profile.trafficMin + profile.trafficMax) / 2) * demandShare;
+}
+
+function getFlood(locationKey, crop) {
+  return state.market.flood[locationKey]?.[crop] ?? 0;
+}
+
+function getCropSeason(crop) {
+  return SEASONS.find((season) => SEASONAL_CROPS[season]?.includes(crop)) ?? null;
+}
+
+function isInSeason(crop, season = state.season) {
+  return getCropSeason(crop) === season;
+}
+
+// Market visits left in the current season, this one included.
+function getVisitsLeftInSeason() {
+  return VISITS_PER_SEASON - ((state.round - 1) % VISITS_PER_SEASON);
+}
+
+function capitalize(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// "☀️ Summer crop · +20%" in season, "❄️ Winter crop · −20%" out of season.
+function describeCropSeason(crop) {
+  const season = getCropSeason(crop);
+  const change = isInSeason(crop) ? `+${Math.round(SEASON_PRICE_BONUS * 100)}%` : `−${Math.round(OFF_SEASON_PRICE_PENALTY * 100)}%`;
+  return `${SEASON_EMOJIS[season]} ${capitalize(season)} crop · ${change}`;
+}
+
+// How the season changes what customers pay for a crop.
+function getSeasonFactor(crop) {
+  return isInSeason(crop) ? 1 + SEASON_PRICE_BONUS : 1 - OFF_SEASON_PRICE_PENALTY;
+}
+
+// The price customers here judge a crop by: its base price, adjusted for the season and lowered while
+// the market is flooded with it.
+function getReferencePrice(locationKey, crop) {
+  return CROP_BASE_PRICES[crop] * getSeasonFactor(crop) * (1 - getFlood(locationKey, crop));
+}
+
+// After a sale: the crops sold flood this market, then every market recovers a little. Tiny
+// leftovers are dropped so the save stays small.
+function updateMarketFlood(locationKey, cropSales) {
+  for (const [crop, sale] of Object.entries(cropSales)) {
+    const normalDemand = getNormalDemand(locationKey, crop);
+    if (normalDemand > 0) {
+      const flood = getFlood(locationKey, crop) + (sale.quantity / normalDemand) * (MARKET_FLOOD_FACTOR[locationKey] ?? 0);
+      state.market.flood[locationKey] = { ...state.market.flood[locationKey], [crop]: Math.min(MARKET_FLOOD_MAX, flood) };
+    }
+  }
+  recoverMarketFlood();
+}
+
+function recoverMarketFlood() {
+  state.market.flood = Object.fromEntries(Object.entries(state.market.flood).map(([locationKey, crops]) => [
+    locationKey,
+    Object.fromEntries(Object.entries(crops)
+      .map(([crop, flood]) => [crop, flood * (1 - MARKET_FLOOD_RECOVERY)])
+      .filter(([, flood]) => flood >= 0.01)),
+  ]));
+}
+
+// What the player is told before selling a crop at `price` here: how many customers want it (for the
+// market's lowest and highest traffic) and the share who buy at this price. Working out how many units
+// that sells is left to the player.
+function getDemandForecast(locationKey, crop, price) {
+  const profile = MARKET_LOCATIONS[locationKey];
+  const weights = MARKET_DEMAND_WEIGHTS[locationKey] ?? {};
+  const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
+  const demandShare = totalWeight > 0 ? (weights[crop] ?? 0) / totalWeight : 0;
+  const buyChance = getBuyChance(price, getReferencePrice(locationKey, crop));
+  return {
+    wanted: {
+      min: Math.round(profile.trafficMin * demandShare),
+      max: Math.round(profile.trafficMax * demandShare),
+    },
+    buyChance,
+  };
 }
 
 function setMarketLocation(locationKey) {
@@ -629,9 +734,14 @@ function buyHoldSlot() {
   return true;
 }
 
-function adjustMarketPrice(delta, cropKey = state.market.crop || 'tomato') {
-  const currentPrice = state.market.prices[cropKey] ?? 5;
-  const nextPrice = Math.max(1, currentPrice + delta);
+function getPriceStep(cropKey) {
+  return Math.max(1, Math.round(CROP_BASE_PRICES[cropKey] * MARKET_PRICE_STEP_SHARE));
+}
+
+// Moves a crop's price one step up (direction 1) or down (direction -1).
+function adjustMarketPrice(direction, cropKey = state.market.crop || 'tomato') {
+  const currentPrice = state.market.prices[cropKey] ?? CROP_BASE_PRICES[cropKey];
+  const nextPrice = Math.max(1, currentPrice + direction * getPriceStep(cropKey));
   state.market.prices[cropKey] = nextPrice;
   state.market.crop = cropKey;
   render();
@@ -662,6 +772,8 @@ function weightedRandomEntry(weights, random) {
 
 // Each customer wants one crop, drawn from the market's demand weights. A customer who
 // wants a crop the player brought (and still has in stock) buys it with getBuyChance.
+// Every customer who reaches the stall becomes an event; customerNeeds lists all customers in
+// arrival order, which the sale animation uses for the crowd.
 function buildMarketCustomerSimulation(profile, selectedCrops, options = {}) {
   const random = options.random ?? Math.random;
   const demandWeights = MARKET_DEMAND_WEIGHTS[state.market.location] ?? MARKET_DEMAND_WEIGHTS.village;
@@ -682,8 +794,13 @@ function buildMarketCustomerSimulation(profile, selectedCrops, options = {}) {
     if (stock > 0) {
       seller.assortment[crop] = {
         price: Math.max(1, Number(state.market.prices[crop] ?? CROP_BASE_PRICES[crop])),
+        referencePrice: getReferencePrice(state.market.location, crop),
+        flood: getFlood(state.market.location, crop),
         stock,
         initialStock: stock,
+        wanted: 0,
+        served: 0,
+        soldOutAt: null,
       };
     }
   }
@@ -698,13 +815,15 @@ function buildMarketCustomerSimulation(profile, selectedCrops, options = {}) {
     }
 
     seller.requested += 1;
-    // Customers arriving after a crop sold out walk past and aren't animated.
+    offer.wanted += 1;
+    // Customers arriving after a crop sold out find none left.
     if (offer.stock <= 0) {
       return;
     }
 
     seller.customers += 1;
-    const bought = random() < getBuyChance(offer.price, CROP_BASE_PRICES[crop]);
+    offer.served += 1;
+    const bought = random() < getBuyChance(offer.price, offer.referencePrice);
 
     if (bought) {
       offer.stock -= 1;
@@ -715,23 +834,17 @@ function buildMarketCustomerSimulation(profile, selectedCrops, options = {}) {
       cropSale.quantity += 1;
       cropSale.revenue += offer.price;
       seller.cropSales[crop] = cropSale;
+      if (offer.stock === 0) {
+        offer.soldOutAt = customerIndex + 1;
+      }
     }
 
     events.push({
-      id: `customer-${customerIndex + 1}`,
-      sellerName: bought ? seller.name : null,
-      sellerKey: bought ? 'you' : null,
-      table: bought ? 'you' : 'market',
-      side: events.length % 2 === 0 ? 'left' : 'right',
-      crop,
-      wantedCrop: crop,
-      emoji: CROP_EMOJIS[crop] ?? '🌱',
       customerIndex: customerIndex + 1,
-      requested: 1,
-      offered: true,
+      crop,
+      price: offer.price,
       sold: bought ? 1 : 0,
       revenue: bought ? offer.price : 0,
-      price: offer.price,
     });
   });
 
@@ -776,6 +889,7 @@ function finalizeMarketSimulation(profile, simulation) {
     state.cropInventory[crop] = units - getSpoiledUnits(units);
   }
   state.market.keep = {};
+  updateMarketFlood(simulation.locationKey ?? state.market.location, playerSeller.cropSales);
   state.coins += totalRevenue + contractRewards;
   state.lastHarvestUnits = simulation.unitsBrought ?? state.lastHarvestUnits;
   state.lastHarvestCrops = simulation.harvestedCrops ?? state.lastHarvestCrops;
@@ -794,8 +908,34 @@ function finalizeMarketSimulation(profile, simulation) {
   state.market.skipAnimationEnabledAt = 0;
   state.market.activeSimulation = null;
   state.market.activeSelectedCrops = [];
+  saleDay = null;
   state.market.lastSummary = `Selling in ${profile.label}: ${summaries.join(' • ')}. Total revenue: ${totalRevenue + contractRewards} coins.`;
   render();
+}
+
+// Below this share of interested customers served, a crop sold out "early".
+const EARLY_SELL_OUT_SHARE = 0.6;
+// Below this share of buyers among the customers served, the price drove customers away.
+const LOW_BUY_SHARE = 0.5;
+
+// One line of advice per crop for the sale report, from how its stock and customers played out.
+function getCropSaleTip(crop, offer) {
+  const sold = offer.initialStock - offer.stock;
+  if (!offer.wanted) {
+    return { kind: 'less', text: `Nobody here wanted ${crop} today: sell it at another market.` };
+  }
+  if (offer.stock === 0) {
+    return offer.served / offer.wanted < EARLY_SELL_OUT_SHARE
+      ? { kind: 'up', text: `Sold out after ${offer.served} of ${offer.wanted} interested customers: charge more or bring more.` }
+      : { kind: 'ok', text: 'Sold out near closing: the price looks right.' };
+  }
+  if (sold / offer.served < LOW_BUY_SHARE) {
+    return { kind: 'down', text: `${offer.served - sold} of ${offer.served} customers passed at ${offer.price} coins: try a lower price.` };
+  }
+  if (offer.wanted >= offer.initialStock) {
+    return { kind: 'down', text: `${offer.stock} left: a slightly lower price would sell them.` };
+  }
+  return { kind: 'less', text: `Only ${offer.wanted} customers wanted ${crop}: bring fewer, or sell some at another market.` };
 }
 
 function getSellingBlocker() {
@@ -830,6 +970,7 @@ function startNextSeason() {
   state.market.activeSimulation = null;
   state.market.activeSelectedCrops = [];
   state.market.skipAnimationEnabledAt = 0;
+  saleDay = null;
   state.shopOpen = true;
   generateContractOffers();
 }
@@ -841,6 +982,7 @@ function skipSeason() {
   }
 
   state.cropInventory = createCropInventoryState();
+  recoverMarketFlood();
   advanceTime();
   startNextSeason();
   state.market.lastSummary = 'Season skipped. The harvest and the field were discarded.';
@@ -948,6 +1090,7 @@ function createSale(profile) {
 
   return {
     ...buildMarketCustomerSimulation(profile, selectedCrops),
+    locationKey: state.market.location,
     contracts,
     kept,
     unitsBrought,
@@ -974,52 +1117,69 @@ function startSelling() {
   state.market.simulating = true;
   state.market.saleComplete = false;
   state.market.saleReport = null;
-  state.market.simulationEvents = simulation.events;
-  state.market.currentCustomerIndex = -1;
   state.market.activeSimulation = simulation;
   state.market.activeSelectedCrops = [...selectedCrops];
   state.market.skipAnimation = false;
   state.market.skipAnimationEnabledAt = Date.now() + 3000;
   state.market.lastSummary = `Selling in ${profile.label}...`;
-  render();
-
-  setTimeout(() => {
-    if (state.market.simulating && !state.market.skipAnimation) {
-      render();
-    }
-  }, 3000);
-
-  const advanceCustomerSimulation = () => {
-    // Stop the loop once this sale has been finalized (e.g. via Skip Animation).
-    if (!state.market.simulating || state.market.activeSimulation !== simulation) {
-      return;
-    }
-
-    if (state.market.skipAnimation) {
-      finalizeMarketSimulation(profile, simulation);
-      return;
-    }
-
-    const nextIndex = state.market.currentCustomerIndex + 1;
-    const event = state.market.simulationEvents[nextIndex];
-
-    if (!event) {
-      finalizeMarketSimulation(profile, simulation);
-      return;
-    }
-
-    state.market.currentCustomerIndex = nextIndex;
-    state.market.lastSummary = event.sold
-      ? `${event.sellerName} sold ${event.crop} for +$${event.revenue}.`
-      : `A customer passed on ${event.crop} at ${event.price} coins.`;
-
-    render();
-
-    const delay = event.sold ? 1500 : 1100;
-    setTimeout(advanceCustomerSimulation, delay);
+  saleDay = {
+    simulation,
+    timeline: buildSaleTimeline(simulation, {
+      emojis: CROP_EMOJIS,
+      msPerCustomer: SALE_DAY_MS_PER_CUSTOMER,
+      minMs: SALE_DAY_MIN_MS,
+      maxMs: SALE_DAY_MAX_MS,
+    }),
+    elapsed: 0,
+    lastFrameAt: Date.now(),
+    walkerElements: new Map(),
   };
+  render();
+  scheduleSaleDayFrame(() => advanceSaleDay(profile, simulation));
+}
 
-  setTimeout(advanceCustomerSimulation, 900);
+// Animation frames when the sale screen is on display; a plain timer otherwise (tests, no DOM),
+// so the day still ends and settles the sale.
+function scheduleSaleDayFrame(callback) {
+  const stage = typeof document === 'undefined' ? null : document.querySelector('.market-sim-stage');
+  if (stage && typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(callback);
+  } else {
+    setTimeout(callback, 16);
+  }
+}
+
+function advanceSaleDay(profile, simulation) {
+  // Stop once this sale has been settled (e.g. via Skip) or left.
+  if (!saleDay || saleDay.simulation !== simulation || state.market.activeSimulation !== simulation || !state.market.simulating) {
+    return;
+  }
+
+  const now = Date.now();
+  // A long gap (a hidden window) pauses the day instead of jumping ahead.
+  saleDay.elapsed += Math.min(now - saleDay.lastFrameAt, 100) * uiState.saleSpeed;
+  saleDay.lastFrameAt = now;
+
+  if (saleDay.elapsed >= saleDay.timeline.durationMs) {
+    finalizeMarketSimulation(profile, simulation);
+    return;
+  }
+
+  const stage = typeof document === 'undefined' ? null : document.querySelector('.market-sim-stage');
+  if (stage) {
+    updateSaleStage(stage, saleDay.timeline, saleDay.elapsed, saleDay.walkerElements);
+    const skipButton = document.getElementById('sale-screen-skip-animation');
+    if (skipButton?.disabled && now >= state.market.skipAnimationEnabledAt) {
+      skipButton.disabled = false;
+    }
+  }
+
+  scheduleSaleDayFrame(() => advanceSaleDay(profile, simulation));
+}
+
+function cycleSaleSpeed() {
+  const index = SALE_DAY_SPEEDS.indexOf(uiState.saleSpeed);
+  uiState.saleSpeed = SALE_DAY_SPEEDS[(index + 1) % SALE_DAY_SPEEDS.length];
 }
 
 function createInitialGameState() {
@@ -1244,8 +1404,6 @@ function clearBoardForReturn() {
   state.harvestFeedback = '';
   state.harvestFlash = null;
   state.combo = 0;
-  state.market.simulationEvents = [];
-  state.market.currentCustomerIndex = -1;
   state.market.saleReport = null;
   state.market.activeSimulation = null;
   state.market.activeSelectedCrops = [];
@@ -1898,7 +2056,9 @@ function renderCropTiles(goalLabel) {
         action: 'select-crop',
         data: `data-shop-crop="${crop}"`,
         classes: [crop === selected && 'selected'],
-        title: `${config.label}: seeds and upgrades`,
+        // The Shop opens after a visit, so state.season is already the season of the next visit.
+        title: `${config.label}: seeds and upgrades${isInSeason(crop) ? ` · in season at the next market visit (+${Math.round(SEASON_PRICE_BONUS * 100)}%)` : ''}`,
+        badge: isInSeason(crop) ? SEASON_EMOJIS[state.season] : '',
       });
     }
 
@@ -2082,7 +2242,7 @@ function renderMarketPanel() {
       <div class="market-modal-panel" role="dialog" aria-modal="true">
         <div class="market-header">
           <h2>Marketplace</h2>
-          <button type="button" id="market-close" class="close-button">×</button>
+          <button type="button" id="market-close" class="close-button" aria-label="Close">${ICON_CLOSE}</button>
         </div>
 
         <div class="market-form">
@@ -2103,7 +2263,7 @@ function renderMarketPanel() {
                   const price = Number(state.market.prices[item] ?? CROP_BASE_PRICES[item]);
                   const isActive = crop === item;
                   const soldHere = productPool.includes(item);
-                  const buyerShare = Math.round(getBuyChance(price, CROP_BASE_PRICES[item]) * 100);
+                  const forecast = soldHere ? getDemandForecast(state.market.location, item, price) : null;
 
                   return `
                     <div class="sale-row market-crop-row ${isActive ? 'active' : ''}" data-market-crop-row="${item}">
@@ -2115,6 +2275,7 @@ function renderMarketPanel() {
                           </button>
                         </div>
                         <div class="market-crop-counts">
+                          ${soldHere ? `<span class="season-chip ${isInSeason(item) ? 'in-season' : 'off-season'}" title="Customers pay ${isInSeason(item) ? 'more for crops in season' : 'less for crops out of season'}">${describeCropSeason(item)}</span>` : ''}
                           <span class="market-crop-count">Harvest: ${state.cropInventory[item]}</span>
                         </div>
                       </div>
@@ -2128,9 +2289,15 @@ function renderMarketPanel() {
                         ${soldHere ? `
                           <div class="selector-row small-inline">
                             <button type="button" class="small-button" data-market-crop="${item}" data-market-action="price-dec" ${state.market.simulating ? 'disabled' : ''}>-</button>
-                            <span>Price: <strong>${price}</strong> · ~${buyerShare}% of buyers</span>
+                            <span>Price: <strong>${price}</strong> <span class="price-change">${describePriceChange(price, CROP_BASE_PRICES[item])}</span></span>
                             <button type="button" class="small-button" data-market-crop="${item}" data-market-action="price-inc" ${state.market.simulating ? 'disabled' : ''}>+</button>
                           </div>
+                          <p class="market-forecast" title="Expected for this market's lowest and highest traffic">
+                            📊 ${formatRange(forecast.wanted)} customers want ${item} · ~${Math.round(forecast.buyChance * 100)}% buy at this price
+                          </p>
+                          ${getFlood(state.market.location, item) >= MIN_SHOWN_FLOOD ? `
+                            <p class="market-flood">🥱 ${profile.label} has had plenty of ${item} lately: customers pay ~${Math.round(getFlood(state.market.location, item) * 100)}% less</p>
+                          ` : ''}
                         ` : `
                           <p class="empty-sale">${profile.label} customers don't buy ${item}. Any you don't keep will spoil.</p>
                         `}
@@ -2165,6 +2332,18 @@ function renderMarketPanel() {
       </div>
     </div>
   `;
+}
+
+function formatRange({ min, max }) {
+  return min === max ? `${min}` : `${min}–${max}`;
+}
+
+function describePriceChange(price, basePrice) {
+  const change = Math.round((price / basePrice - 1) * 100);
+  if (change === 0) {
+    return 'base price';
+  }
+  return change > 0 ? `+${change}%` : `−${-change}%`;
 }
 
 function describeBestResult(best) {
@@ -2232,16 +2411,50 @@ function renderGameOverScreen() {
   `;
 }
 
+// Drawn icons instead of the ☰ and × characters, whose vertical position depends on the font.
+const ICON_MENU = '<svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14" /></svg>';
+const ICON_CLOSE = '<svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>';
+
+const SALE_TIP_ICONS = { up: '📈', ok: '✅', down: '📉', less: '📦' };
+// Smaller floods are left unmentioned.
+const MIN_SHOWN_FLOOD = 0.05;
+
+// The market stall with its stock, a day clock and the coins taken. Walkers and the numbers are
+// updated each frame by updateSaleStage; this renders the current moment of the day.
+function renderSaleStage() {
+  const offers = state.market.activeSimulation?.sellers?.[0]?.assortment ?? {};
+  const snapshot = saleDay
+    ? getSaleDaySnapshot(saleDay.timeline, saleDay.elapsed)
+    : { clock: formatDayClock(0), coins: 0, stock: Object.fromEntries(Object.entries(offers).map(([crop, offer]) => [crop, offer.initialStock])), closed: false };
+  const bannerText = saleDay?.timeline.soldOutEarly ? 'Sold out! 🎉 Closing early' : 'Sunset: the market closes';
+
+  return `
+    <div class="market-sim-stage ${state.market.simulating ? 'running' : ''}">
+      <div class="sale-street"></div>
+      <div class="sale-hud">
+        <span class="sale-hud-chip">🕗 <strong data-sale-clock>${snapshot.clock}</strong></span>
+        <span class="sale-hud-chip">💰 +<strong data-sale-coins>${snapshot.coins.toLocaleString('en-US')}</strong></span>
+      </div>
+      <div class="sale-stall">
+        <div class="sale-stall-awning"></div>
+        <div class="sale-stall-counter">
+          ${Object.keys(offers).map((crop) => `
+            <span class="stall-crop ${snapshot.stock[crop] === 0 ? 'sold-out' : ''}" data-stock-crop="${crop}">${CROP_EMOJIS[crop] ?? '🌱'}<b>${snapshot.stock[crop]}</b></span>
+          `).join('')}
+        </div>
+      </div>
+      <div class="sale-crowd"></div>
+      <div class="sale-closed-banner" ${snapshot.closed ? '' : 'hidden'}>${bannerText}</div>
+    </div>
+  `;
+}
+
 function renderSaleSimulationScreen() {
   const profile = getMarketLocationProfile();
   const isFinished = !state.market.simulating && state.market.saleComplete;
   const report = state.market.saleReport ?? { sellers: [], totalCustomers: 0, totalRequested: 0, totalSold: 0, totalRevenue: 0 };
-  const activeEvent = state.market.simulationEvents[state.market.currentCustomerIndex] ?? null;
-  const visibleEvents = activeEvent ? [activeEvent] : [];
   const skipEnabled = state.market.simulating && Date.now() >= (state.market.skipAnimationEnabledAt ?? 0);
   const skipButtonDisabled = state.market.simulating && !skipEnabled;
-  const cinematicStart = activeEvent ? `${activeEvent.side === 'left' ? '-18%' : '118%'}` : '-18%';
-  const cinematicEnd = activeEvent ? (activeEvent.table === 'you' ? 30 : 70) : 30;
 
   return `
     <div class="sale-screen">
@@ -2253,38 +2466,19 @@ function renderSaleSimulationScreen() {
           </div>
         </div>
 
-        <div class="market-simulation" aria-label="Market simulation">
-          <div class="market-sim-stage ${state.market.simulating ? 'running' : ''}">
-            <div class="market-table our-table" style="left:30%; top:62%">
-              <span class="table-label">You</span>
-            </div>
-            ${visibleEvents.map((event, index) => {
-              const isPlayerCustomer = event.table === 'you';
-              const startX = event.side === 'left' ? cinematicStart : (event.side === 'right' ? '118%' : '-18%');
-              const endX = event.table === 'market' ? 50 : (isPlayerCustomer ? 30 : 70);
-              const startY = isPlayerCustomer ? 18 + (index % 3) * 8 : 18 + (index % 3) * 15;
-              const endY = isPlayerCustomer ? 65 : 60;
-              const customerClass = isPlayerCustomer ? 'customer from-left' : 'customer from-right';
-              return `
-                <div
-                  class="${customerClass}"
-                  style="--start-x:${startX}; --end-x:${endX}%; --start-y:${startY}%; --end-y:${endY}%; top:${startY}%; animation-delay:0s;"
-                >
-                  ${event.sold ? `<span class="purchase-emoji">${event.emoji}</span>` : ''}
-                </div>
-              `;
-            }).join('')}
-            ${visibleEvents.filter((event) => event.sold).map((event) => {
-              const left = event.table === 'you' ? 30 : (event.table === 'market' ? 50 : 70);
-              return `<div class="float-gain sale-gain" style="left:${left}%; top:20%;">💰 +$${event.revenue}</div>`;
-            }).join('')}
+        ${state.market.simulating ? `
+          <div class="market-simulation" aria-label="Market simulation">
+            ${renderSaleStage()}
           </div>
-        </div>
+        ` : ''}
 
         <div class="sale-screen-body">
           <p class="market-summary">${state.market.lastSummary}</p>
           ${state.market.simulating ? `
-            <button type="button" id="sale-screen-skip-animation" class="sell-button skip-animation-button" ${skipButtonDisabled ? 'disabled' : ''}>Skip Animation</button>
+            <div class="sale-day-controls">
+              <button type="button" id="sale-screen-speed" class="sell-button speed-button" title="Play the day faster">⏩ ${uiState.saleSpeed}×</button>
+              <button type="button" id="sale-screen-skip-animation" class="sell-button skip-animation-button" ${skipButtonDisabled ? 'disabled' : ''}>Skip to results</button>
+            </div>
           ` : ''}
           ${isFinished ? `
             <div class="sale-report">
@@ -2317,6 +2511,7 @@ function renderSaleSimulationScreen() {
                       </div>
                       ${Object.entries(seller.assortment).map(([crop, offer]) => {
                         const sale = seller.cropSales?.[crop];
+                        const tip = offer.wanted == null ? null : getCropSaleTip(crop, offer);
                         return `
                           <div class="sale-report-crop-row">
                             <span>${CROP_EMOJIS[crop] ?? '🌱'} ${crop}</span>
@@ -2326,6 +2521,10 @@ function renderSaleSimulationScreen() {
                             <span>+${sale?.revenue ?? 0} coins</span>
                             <span>${offer.stock}</span>
                           </div>
+                          ${tip ? `<p class="sale-tip tip-${tip.kind}">${SALE_TIP_ICONS[tip.kind]} ${tip.text}</p>` : ''}
+                          ${(offer.flood ?? 0) >= MIN_SHOWN_FLOOD ? `
+                            <p class="sale-tip tip-flood">🥱 ${profile.label} was flooded with ${crop}: customers paid ~${Math.round(offer.flood * 100)}% less. Selling it elsewhere or skipping a visit lets it recover.</p>
+                          ` : ''}
                         `;
                       }).join('')}
                     </div>
@@ -2394,11 +2593,13 @@ function render() {
         </div>
         <div class="hud">
           <div class="stat"><span>Round</span><strong>${state.round}</strong></div>
-          <div class="stat"><span>Season</span><strong>${state.season}</strong></div>
+          <div class="stat" title="${capitalize(state.season)} crops sell for ${Math.round(SEASON_PRICE_BONUS * 100)}% more, the others for ${Math.round(OFF_SEASON_PRICE_PENALTY * 100)}% less">
+            <span>Season</span><strong>${SEASON_EMOJIS[state.season]} ${capitalize(state.season)}${getVisitsLeftInSeason() === 1 ? ' <small>(last visit)</small>' : ''}</strong>
+          </div>
           <div class="stat"><span>Age</span><strong>${state.age}</strong></div>
           <div class="stat" title="Reach ${GOAL_COINS.toLocaleString('en-US')} coins before age ${DEATH_AGE}"><span>Coins / Goal</span><strong>${state.coins.toLocaleString('en-US')} / 1M</strong></div>
           ${renderNextGoal()}
-          <button id="menu-button" type="button" class="swap-button menu-button" title="Save and return to the main menu" aria-label="Main menu">☰</button>
+          <button id="menu-button" type="button" class="swap-button menu-button" title="Save and return to the main menu" aria-label="Main menu">${ICON_MENU}</button>
         </div>
       </header>
 
@@ -2415,6 +2616,7 @@ function render() {
           </div>
         </section>
 
+        <div class="side-column">
         <aside class="panel sidebar">
           <h2>Inventory</h2>
           <ul class="inventory-list">
@@ -2431,8 +2633,13 @@ function render() {
             `).join('')}
           </ul>
 
+          <button id="market-toggle" type="button" class="market-toggle">
+            ${state.marketOpen ? 'Hide Marketplace' : 'Marketplace'}
+          </button>
+        </aside>
+
           ${state.contracts.active.length ? `
-            <div class="contracts-panel">
+            <div class="panel contracts-panel">
               <h3>Contracts</h3>
               ${state.contracts.active.map((contract) => {
                 const have = state.cropInventory[contract.crop] ?? 0;
@@ -2445,11 +2652,7 @@ function render() {
               }).join('')}
             </div>
           ` : ''}
-
-          <button id="market-toggle" type="button" class="market-toggle">
-            ${state.marketOpen ? 'Hide Marketplace' : 'Marketplace'}
-          </button>
-        </aside>
+        </div>
       </main>
     </div>
 
@@ -2622,6 +2825,14 @@ function bindInteractions() {
       return;
     }
 
+    const saleScreenSpeed = event.target.closest('#sale-screen-speed');
+    if (saleScreenSpeed) {
+      // Updated in place: a full render would only restart the walkers' elements.
+      cycleSaleSpeed();
+      saleScreenSpeed.textContent = `⏩ ${uiState.saleSpeed}×`;
+      return;
+    }
+
     const saleScreenContinue = event.target.closest('#sale-screen-continue');
     if (saleScreenContinue) {
       startNextSeason();
@@ -2759,6 +2970,7 @@ function bindInteractions() {
 export {
   acceptContract,
   adjustKeep,
+  adjustMarketPrice,
   advanceHand,
   advanceTime,
   autoHarvest,
@@ -2768,6 +2980,7 @@ export {
   buySeedPack,
   checkForGameOver,
   continueGame,
+  cycleSaleSpeed,
   createHandState,
   createInitialGameState,
   createMarketState,
@@ -2778,10 +2991,13 @@ export {
   getBarnCapacity,
   getBuyChance,
   getCalendar,
+  getCropSaleTip,
+  getDemandForecast,
   getEmergencyRestockCost,
   getHarvestYield,
   getMarketLocationProfile,
   getNextGoal,
+  getReferencePrice,
   getUpgradeCost,
   getVarietyCount,
   holdBlock,

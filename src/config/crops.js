@@ -69,8 +69,8 @@ export const INITIAL_CROP_INVENTORY = Object.fromEntries(CROP_KEYS.map((crop) =>
 // A market's customers only buy the crops listed in its MARKET_DEMAND_WEIGHTS entry.
 export const MARKET_LOCATIONS = {
   village: { label: 'Village', unlockCost: 0, trafficMin: 50, trafficMax: 100, minVariety: 2 },
-  town: { label: 'Town', unlockCost: 2000, trafficMin: 250, trafficMax: 750, minVariety: 3 },
-  city: { label: 'City', unlockCost: 25000, trafficMin: 1000, trafficMax: 5000, minVariety: 4 },
+  town: { label: 'Town', unlockCost: 2000, trafficMin: 300, trafficMax: 500, minVariety: 3 },
+  city: { label: 'City', unlockCost: 25000, trafficMin: 1200, trafficMax: 1800, minVariety: 4 },
 };
 
 // A crop counts toward the variety minimum only with at least this many units offered for sale
@@ -81,6 +81,31 @@ export const MIN_UNITS_FOR_VARIETY = 3;
 // MARKET_PRICE_SENSITIVITY controls how quickly that share falls as the price rises.
 export const MARKET_BASE_BUY_RATE = 0.7;
 export const MARKET_PRICE_SENSITIVITY = 4;
+
+// Market memory: selling a crop floods that market for a while, and its customers pay less for it.
+// A sale adds (units sold ÷ the market's normal demand for the crop) × the market's MARKET_FLOOD_FACTOR;
+// after every market visit each market's flooding shrinks by MARKET_FLOOD_RECOVERY. A crop flooded by
+// 0.3 is bought as if its base price were 30% lower. Repeating the same visit settles at about the
+// flood one sale adds. The Village is exempt: early on it is the only market, so there is no way out.
+export const MARKET_FLOOD_FACTOR = { village: 0, town: 1.5, city: 1.5 };
+export const MARKET_FLOOD_RECOVERY = 0.5;
+export const MARKET_FLOOD_MAX = 0.6;
+
+// Seasonal demand: customers pay more for crops in season (SEASONAL_CROPS) and less out of season.
+// With today's crop values this shifts income between seasons rather than changing what is grown.
+export const SEASON_PRICE_BONUS = 0.2;
+export const OFF_SEASON_PRICE_PENALTY = 0.2;
+
+// The price − / + buttons move the price by this share of the crop's base price (at least 1 coin),
+// so every crop needs about the same number of clicks.
+export const MARKET_PRICE_STEP_SHARE = 0.1;
+
+// The sale plays as a time-compressed market day. Its length (at 1× speed) grows with the customers
+// who reach the stall, within these limits; the day closes early once everything is sold out.
+export const SALE_DAY_MS_PER_CUSTOMER = 150;
+export const SALE_DAY_MIN_MS = 10000;
+export const SALE_DAY_MAX_MS = 20000;
+export const SALE_DAY_SPEEDS = [1, 2, 4];
 
 // Barn: keep harvested crops for a later market visit instead of selling them now. Kept crops come
 // back as harvest next visit, minus BARN_SPOILAGE of each crop (rounded up). Capacity is upgradable.

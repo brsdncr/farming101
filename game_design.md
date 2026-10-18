@@ -119,11 +119,17 @@ Tomato and Carrot are the cheap starter crops and are unlocked from the start. A
 
 ### 4.3 Seasonal Crops
 
-The calendar alternates between summer and winter (see §7). The crops are grouped by season for future seasonal mechanics; seasons currently have no gameplay effect.
+The calendar alternates between summer and winter (see §7), two market visits each.
 
 * **Winter Crops:** Pumpkin, Carrot, Onion, Beetroot.
 
 * **Summer Crops:** Cherry, Watermelon, Tomato, Eggplant.
+
+* **Seasonal Demand:** Customers pay **20% more** for crops in season and **20% less** for crops out of season: the reference price (see §6.3) is the base price × 1.2 or × 0.8, combined with any market flooding (§6.8).
+
+* **Shown:** The top bar shows the season with its emoji ("☀️ Summer", "❄️ Winter") and "(last visit)" on a season's final visit. In the Marketplace each crop has a chip ("☀️ Summer crop · +20%" or "❄️ Winter crop · −20%"), and the forecast includes the effect. In the Seed Shop, crops that will be in season at the next visit carry the season's emoji.
+
+* **Balance:** The effect is flavour rather than strategy: it moves income between seasons but doesn't change what is worth growing. The summer crops include the three most valuable ones, and even out of season watermelon (−20%: 224) is worth far more than onion in season (+20%: 59), winter's best crop. Stronger effects were tested (up to +50% / −50%): the bot still grew the same crops all year and careers only got slower. Seasons could really change play after a winter-crop rebalance, and ideally the seed bag, since switching crop sets every season would mix both seasons' seeds into the blocks.
 
 ## 5. Harvest System
 
@@ -182,8 +188,8 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 | Location | Unlock Cost | Customer Traffic | Minimum Variety | Crops Bought |
 | ----- | ----- | ----- | ----- | ----- |
 | **Village** | Free | $50 - 100$ | 2 crop types | Tomato, Carrot, Pumpkin, Beetroot |
-| **Town** | 2,000 | $250 - 750$ | 3 crop types | Village crops + Onion, Cherry |
-| **City** | 25,000 | $1000 - 5000$ | 4 crop types | All crops |
+| **Town** | 2,000 | $300 - 500$ | 3 crop types | Village crops + Onion, Cherry |
+| **City** | 25,000 | $1200 - 1800$ | 4 crop types | All crops |
 
 * **Unlocking:** Town and City are unlocked with coins in the Shop. Locked markets are shown in the location list but cannot be selected.
 
@@ -208,11 +214,13 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 
 * **Harvested Crops:** Every harvested crop is listed with its quantity. Everything not kept in the barn is offered for sale.
 
-* **🛖 Keep for later:** Each crop has a − / + control (steps of 5) for how many units to keep in the barn (see §6.6), including crops this market doesn't buy.
+* **🛖 Keep for later:** Each crop has a − / + control (steps of 5) for how many units to keep in the barn (see §6.7), including crops this market doesn't buy.
 
   * Crops the selected market does not buy are marked as spoiling.
 
-* **Price:** Adjust each crop's unit price with − / +. The panel shows the expected share of buyers at that price (e.g. "Price: 13 · ~53% of buyers" for Tomato, base price 11).
+* **Price:** Adjust each crop's unit price with − / +, in steps of 10% of its base price (at least 1 coin), so every crop takes about the same number of clicks. The change from the base price is shown next to it (e.g. "Price: 308 +10%").
+
+* **📊 Forecast:** Below each price: how many customers want the crop, for the market's lowest and highest traffic, and the share who buy at this price (e.g. "23–45 customers want tomato · ~70% buy at this price"). Whether that sells out the stock is deliberately not shown: working it out is the pricing decision.
 
 * **Status:** The panel shows variety progress (e.g. "Variety: 2/2 crop types with 3+ units"), customer traffic, and why selling is blocked, if it is.
 
@@ -220,19 +228,21 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 
 ### 6.3 Sales Simulation Logic
 
-* Clicking **Start Selling** runs the simulation and plays it as an animation (skippable after 3 seconds).
+* Clicking **Start Selling** runs the simulation, then plays it as a **market day** in the spirit of Lemonade Tycoon (see §6.5). The result is fixed before the day starts.
 
 * **Traffic:** A random number of customers within the market's traffic range visits.
 
 * **Demand Curve:** A customer who wants a crop the player brought, while it is still in stock, buys one unit with probability:
 
-  * $r = \frac{\text{Price}}{\text{Base Price}}$, $\quad P(\text{buy}) = \dfrac{1}{1 + \frac{3}{7} e^{4(r - 1)}}$
+  * $r = \frac{\text{Price}}{\text{Reference Price}}$, $\quad P(\text{buy}) = \dfrac{1}{1 + \frac{3}{7} e^{4(r - 1)}}$
 
   * 70% of customers buy at the base price; fewer buy as the price rises and more as it falls.
 
 | Price vs Base | 0.5× | 0.75× | **1×** | 1.25× | 1.5× | 2× |
 | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
 | **Buyers** | 94% | 86% | **70%** | 46% | 24% | 4% |
+
+* **Reference Price:** The crop's base price, adjusted for the season (§4.3) and lowered while the market is flooded with it (§6.8).
 
 * **Pricing Strategy:** When demand exceeds stock, raising the price earns more while still selling out. When stock exceeds demand, lowering the price sells more.
 
@@ -250,7 +260,26 @@ After the sale, a summary shows revenue per crop and a funnel for the player's s
 
 * Gaps in the funnel point to the fix: Wanted ≫ Served means the crop sold out (raise prices or grow more); Served ≫ Sold means the price was too high.
 
-### 6.5 Contracts
+* **Tips:** Each crop in the stock ledger gets one line of advice:
+
+  * 📈 Sold out before 60% of the interested customers were served: charge more or bring more.
+  * ✅ Sold out later than that: the price looks right.
+  * 📉 Fewer than half of the customers served bought: try a lower price. Or, with enough interested customers for the whole stock but some left over: a slightly lower price would sell them.
+  * 📦 Too few customers wanted it: bring fewer, or sell some at another market.
+
+### 6.5 Market Day Animation
+
+* **Scene:** A striped stall in a street. The stall shows each crop's stock, which counts down as units sell and greys out when sold out. A clock runs from 08:00 to 18:00 and a counter shows the coins taken.
+
+* **Customers:** People emojis with varied natural skin tones. They arrive in their simulated order, spread over the day, from both sides. Stall visitors stop at the stall with a speech bubble: the crop and the coins paid, "Too pricey!" (price above 115% of the reference price, see §6.3) or "Not today", and "No 🍅 left" for customers who came after that crop sold out. Passers-by who wanted a crop the player didn't bring stroll past behind the stall, some thinking of it ("🍉?").
+
+* **Sampling:** Only a sample of customers is shown (about one stall visitor per 0.55 s of the day), so big markets stay readable; the stock and coin counters still count every sale.
+
+* **Length:** 150 ms per customer served, between 10 and 20 seconds at 1×. When every crop sells out, the market closes early ("Sold out! Closing early"); otherwise at sunset.
+
+* **Controls:** ⏩ cycles the speed through 1×, 2× and 4× (kept for later days in the session). **Skip to results** settles the sale at once (enabled after 3 seconds). The report replaces the scene when the day ends.
+
+### 6.6 Contracts
 
 Short goals between unlocks: deliver a quantity of one crop to one market within a few visits for a guaranteed reward.
 
@@ -276,7 +305,7 @@ Short goals between unlocks: deliver a quantity of one crop to one market within
 
 * **Saving:** Delivered contracts are recorded with the sale result when selling starts, so quitting mid-sale can't pay a reward twice or lose it.
 
-### 6.6 Barn
+### 6.7 Barn
 
 Keep harvested crops for a later market visit instead of selling them now. This deliberately relaxes the original rule that all harvested crops go to market.
 
@@ -295,6 +324,26 @@ Keep harvested crops for a later market visit instead of selling them now. This 
 * **Saving:** Kept crops are recorded with the sale result when selling starts, so quitting mid-sale can't duplicate or lose them.
 
 * **Balance:** The barn is close to balance-neutral (median millionaire age 65/56/55 with the barn vs 65/54/54 without, for 60/100/160 tiles per visit): the bot usually sells out, so it rarely has anything worth keeping. Its value is situational: carrying crops a market doesn't buy to the next one, saving up for a contract, or building variety for Town or City.
+
+### 6.8 Market Memory
+
+Selling a crop floods that market for a while, and its customers pay less for it. This makes repeating the same visit less rewarding.
+
+* **Flooding:** A sale adds (units sold ÷ the market's normal demand for the crop) × 1.5 to that crop's flood at that market, up to 60%. Normal demand is the crop's share of the market's average traffic. Example: 18 watermelons sold in the City, where about 94 customers normally want them, add about 29%.
+
+* **Recovery:** After every market visit (or skipped season) the flooding at every market halves. Floods under 1% are forgotten.
+
+* **Effect:** Customers judge the crop by a reference price that much lower than its base price (flooded by 30%: they buy watermelon as if it cost 196 instead of 280). The forecast's "% buy" and the "Too pricey!" bubbles use it.
+
+* **Repeating:** Selling the same amount at the same market every visit settles at about the flood one sale adds: about −29% for City watermelon and eggplant and −15% for cherry and onion at the bot's usual volume. Skipping that crop or market for one visit halves it.
+
+* **Village exempt:** Early on the Village is the only market and offers two crops, so there would be no way out. Town and City flood.
+
+* **Shown:** In the Marketplace, under the forecast: "🥱 City has had plenty of watermelon lately: customers pay ~29% less" (from 5%). In the sale report, a 🥱 tip for each crop that was flooded at the sale.
+
+* **Saving:** Flooding is saved with the game; older saves start with none.
+
+* **Balance:** Market memory mostly acts as a late-game price cut: the City is the only buyer of watermelon and eggplant, the most valuable crops, so even at −29% the bot keeps selling them there. It moved the engaged player's millionaire age from 58 to 69 (see §10). Letting Town buy eggplant and watermelon too was tested: the bot then alternated City and Town on about a quarter of visits and reached the million at 63. It was not adopted, to keep Town at 6 crops.
 
 ## 7. Time, Goal & Game Endings
 
@@ -334,9 +383,9 @@ Opens after each market visit (or skipped season) as a full screen with groups o
 
   * **Unlocked crops** show their level; clicking selects the crop. The selected crop's actions appear below the tiles: **Buy 10 seeds** (seed pack price) and **Upgrade** to the next level (price and the new yield multiplier, see §4.2), or "Max level".
 
-* **🏡 Farm & Markets:** Tiles for the **Hold slot** (1,500; see §3.2), the **Barn** (upgrade to 60 for 2,500, then 120 for 15,000; see §6.6), the **Town** (2,000) and **City** (25,000) markets, and the **Emergency** restock (2% of coins, at least 50). Bought items show Owned / Open, and Emergency shows Ready while a charge is held.
+* **🏡 Farm & Markets:** Tiles for the **Hold slot** (1,500; see §3.2), the **Barn** (upgrade to 60 for 2,500, then 120 for 15,000; see §6.7), the **Town** (2,000) and **City** (25,000) markets, and the **Emergency** restock (2% of coins, at least 50). Bought items show Owned / Open, and Emergency shows Ready while a charge is held.
 
-* **📜 Contracts:** Accept up to 2 of the new offers (see §6.5); active contracts are listed with their visits left.
+* **📜 Contracts:** Accept up to 2 of the new offers (see §6.6); active contracts are listed with their visits left.
 
 * **Feedback:** Tiles the player can't afford are dimmed but still clickable, and clicking explains why nothing happened ("Not enough coins for that yet."). The tile matching the HUD's next goal is highlighted.
 
@@ -366,7 +415,7 @@ The economy is tuned with a headless simulation that plays whole careers with th
 
 * **Run:** `npm run balance -- [tilesPerVisit] [runs]` (defaults: 100 tiles, 10 careers).
 
-* **Bot Player:** Picks the placement and rotation that best grows groups or completes them (valuing completed groups by their real yield, so bigger groups score higher), swaps when Next is better, prices each crop to maximise expected revenue, unlocks crops and markets while keeping a seed reserve, upgrades only when supply falls short of demand, restocks the Emergency harvest, and accepts contracts for its target market when they ask for a crop it already grows (planting extra for them).
+* **Bot Player:** Picks the placement and rotation that best grows groups or completes them (valuing completed groups by their real yield, so bigger groups score higher), swaps when Next is better, prices each crop to maximise expected revenue (taking market memory into account), unlocks crops and markets while keeping a seed reserve, upgrades only when supply falls short of demand, restocks the Emergency harvest, and accepts contracts for its target market when they ask for a crop it already grows (planting extra for them).
 
 * **Effort** (crop tiles planted per visit) is the key input: with auto-harvest, the field size does not cap output.
 
@@ -374,10 +423,16 @@ The economy is tuned with a headless simulation that plays whole careers with th
 
 | Tiles per Visit | 40 | 60 | 100 | 160 |
 | ----- | ----- | ----- | ----- | ----- |
-| **Reached 1,000,000** | 0/40 | 39/40 | 40/40 | 40/40 |
-| **Median Age at 1,000,000** | — | 65 | 54 | 54 |
+| **Reached 1,000,000** | 0/40 | 35/40 | 39/40 | 37/40 |
+| **Median Age at 1,000,000** | — | 78 | 69 | 75 |
 
-* Town is typically unlocked around age 21 and City around age 24–27.
+* Town is typically unlocked around age 21 and City around age 27–32.
+
+* **Seasonal demand** (§4.3, ±20%) is close to balance-neutral: before it, the results were 30/40 at age 79, 40/40 at 69 and 37/40 at 74.
+
+* **Market memory** (§6.8) costs about 11 years at 100 tiles per visit: without it the results were 38/40 at age 68, 40/40 at 58 and 40/40 at 60.
+
+* **Market size:** A visit brings roughly 60–110 units whatever the effort, because the 6×6 field caps output. Town and City traffic was trimmed (from 250–750 and 1,000–5,000) so prices matter more there: with the old City, about 15 customers wanted each unit brought and the bot sold out at ~1.65× the base price; now about 7–10 do, at ~1.4–1.5×. This made careers about 4–6 years longer. Making demand tighter still slows careers sharply (City 400–700: no bot reached 1,000,000), unless bigger markets pay more (see the roadmap's per-market prices).
 
 * The bot delivers about 0.7–1 contract per visit. Contract rewards (1.5× base price) were tuned to keep the engaged player near age 55; at 2× the engaged player became a millionaire around age 50.
 

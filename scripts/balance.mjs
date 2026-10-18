@@ -191,13 +191,15 @@ function expectedWanters(locationKey, crop) {
   return ((profile.trafficMin + profile.trafficMax) / 2) * ((weights[crop] ?? 0) / totalWeight);
 }
 
-// Price that maximizes expected revenue given stock and demand.
+// Price that maximizes expected revenue given stock and demand (customers judge by the reference
+// price, which is lower while the market is flooded with the crop).
 function bestPrice(locationKey, crop, stock) {
   const basePrice = CROP_BASE_PRICES[crop];
+  const referencePrice = app.getReferencePrice(locationKey, crop);
   const wanters = expectedWanters(locationKey, crop);
   let best = { price: basePrice, revenue: 0 };
-  for (let price = Math.max(1, Math.round(basePrice * 0.5)); price <= basePrice * 3; price += 1) {
-    const revenue = price * Math.min(stock, wanters * app.getBuyChance(price, basePrice));
+  for (let price = Math.max(1, Math.round(basePrice * 0.3)); price <= basePrice * 3; price += 1) {
+    const revenue = price * Math.min(stock, wanters * app.getBuyChance(price, referencePrice));
     if (revenue > best.revenue) {
       best = { price, revenue };
     }
@@ -246,7 +248,7 @@ function visitMarket(stats) {
           .filter((contract) => contract.crop === crop && contract.locationKey === plan.locationKey)
           .reduce((sum, contract) => sum + contract.quantity, 0);
         const expectedSales = plan.crops.includes(crop)
-          ? expectedWanters(plan.locationKey, crop) * app.getBuyChance(plan.prices[crop].price, CROP_BASE_PRICES[crop])
+          ? expectedWanters(plan.locationKey, crop) * app.getBuyChance(plan.prices[crop].price, app.getReferencePrice(plan.locationKey, crop))
           : 0;
         return { crop, units: Math.floor(stock - contractNeed - expectedSales), value: CROP_BASE_PRICES[crop] };
       })
@@ -307,9 +309,10 @@ function demandTiles(locationKey, crop) {
 }
 
 function planSeeds(locationKey) {
+  // Most valuable first, as this market will pay for them now (flooded crops are worth less).
   const crops = Object.keys(MARKET_DEMAND_WEIGHTS[locationKey])
     .filter(isUnlocked)
-    .sort((a, b) => CROP_BASE_PRICES[b] - CROP_BASE_PRICES[a]);
+    .sort((a, b) => app.getReferencePrice(locationKey, b) - app.getReferencePrice(locationKey, a));
   const minVariety = MARKET_LOCATIONS[locationKey].minVariety;
   const tilesByCrop = {};
   let tilesLeft = TILES_PER_VISIT;
