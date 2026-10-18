@@ -2616,6 +2616,7 @@ function render() {
           </div>
         </section>
 
+        <div class="side-column">
         <aside class="panel sidebar">
           <h2>Inventory</h2>
           <ul class="inventory-list">
@@ -2632,8 +2633,13 @@ function render() {
             `).join('')}
           </ul>
 
+          <button id="market-toggle" type="button" class="market-toggle">
+            ${state.marketOpen ? 'Hide Marketplace' : 'Marketplace'}
+          </button>
+        </aside>
+
           ${state.contracts.active.length ? `
-            <div class="contracts-panel">
+            <div class="panel contracts-panel">
               <h3>Contracts</h3>
               ${state.contracts.active.map((contract) => {
                 const have = state.cropInventory[contract.crop] ?? 0;
@@ -2646,11 +2652,7 @@ function render() {
               }).join('')}
             </div>
           ` : ''}
-
-          <button id="market-toggle" type="button" class="market-toggle">
-            ${state.marketOpen ? 'Hide Marketplace' : 'Marketplace'}
-          </button>
-        </aside>
+        </div>
       </main>
     </div>
 
