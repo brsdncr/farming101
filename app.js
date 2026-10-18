@@ -2242,7 +2242,7 @@ function renderMarketPanel() {
       <div class="market-modal-panel" role="dialog" aria-modal="true">
         <div class="market-header">
           <h2>Marketplace</h2>
-          <button type="button" id="market-close" class="close-button">×</button>
+          <button type="button" id="market-close" class="close-button" aria-label="Close">${ICON_CLOSE}</button>
         </div>
 
         <div class="market-form">
@@ -2410,6 +2410,10 @@ function renderGameOverScreen() {
     </div>
   `;
 }
+
+// Drawn icons instead of the ☰ and × characters, whose vertical position depends on the font.
+const ICON_MENU = '<svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14" /></svg>';
+const ICON_CLOSE = '<svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>';
 
 const SALE_TIP_ICONS = { up: '📈', ok: '✅', down: '📉', less: '📦' };
 // Smaller floods are left unmentioned.
@@ -2595,7 +2599,7 @@ function render() {
           <div class="stat"><span>Age</span><strong>${state.age}</strong></div>
           <div class="stat" title="Reach ${GOAL_COINS.toLocaleString('en-US')} coins before age ${DEATH_AGE}"><span>Coins / Goal</span><strong>${state.coins.toLocaleString('en-US')} / 1M</strong></div>
           ${renderNextGoal()}
-          <button id="menu-button" type="button" class="swap-button menu-button" title="Save and return to the main menu" aria-label="Main menu">☰</button>
+          <button id="menu-button" type="button" class="swap-button menu-button" title="Save and return to the main menu" aria-label="Main menu">${ICON_MENU}</button>
         </div>
       </header>
 
