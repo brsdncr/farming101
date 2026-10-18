@@ -182,8 +182,8 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 | Location | Unlock Cost | Customer Traffic | Minimum Variety | Crops Bought |
 | ----- | ----- | ----- | ----- | ----- |
 | **Village** | Free | $50 - 100$ | 2 crop types | Tomato, Carrot, Pumpkin, Beetroot |
-| **Town** | 2,000 | $250 - 750$ | 3 crop types | Village crops + Onion, Cherry |
-| **City** | 25,000 | $1000 - 5000$ | 4 crop types | All crops |
+| **Town** | 2,000 | $300 - 500$ | 3 crop types | Village crops + Onion, Cherry |
+| **City** | 25,000 | $1200 - 1800$ | 4 crop types | All crops |
 
 * **Unlocking:** Town and City are unlocked with coins in the Shop. Locked markets are shown in the location list but cannot be selected.
 
@@ -395,10 +395,12 @@ The economy is tuned with a headless simulation that plays whole careers with th
 
 | Tiles per Visit | 40 | 60 | 100 | 160 |
 | ----- | ----- | ----- | ----- | ----- |
-| **Reached 1,000,000** | 0/40 | 39/40 | 40/40 | 40/40 |
-| **Median Age at 1,000,000** | — | 65 | 54 | 54 |
+| **Reached 1,000,000** | 0/40 | 38/40 | 40/40 | 40/40 |
+| **Median Age at 1,000,000** | — | 68 | 58 | 60 |
 
-* Town is typically unlocked around age 21 and City around age 24–27.
+* Town is typically unlocked around age 21 and City around age 25–28.
+
+* **Market size:** A visit brings roughly 60–110 units whatever the effort, because the 6×6 field caps output. Town and City traffic was trimmed (from 250–750 and 1,000–5,000) so prices matter more there: with the old City, about 15 customers wanted each unit brought and the bot sold out at ~1.65× the base price; now about 7–10 do, at ~1.4–1.5×. This made careers about 4–6 years longer. Making demand tighter still slows careers sharply (City 400–700: no bot reached 1,000,000), unless bigger markets pay more (see the roadmap's per-market prices).
 
 * The bot delivers about 0.7–1 contract per visit. Contract rewards (1.5× base price) were tuned to keep the engaged player near age 55; at 2× the engaged player became a millionaire around age 50.
 

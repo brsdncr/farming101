@@ -69,8 +69,8 @@ export const INITIAL_CROP_INVENTORY = Object.fromEntries(CROP_KEYS.map((crop) =>
 // A market's customers only buy the crops listed in its MARKET_DEMAND_WEIGHTS entry.
 export const MARKET_LOCATIONS = {
   village: { label: 'Village', unlockCost: 0, trafficMin: 50, trafficMax: 100, minVariety: 2 },
-  town: { label: 'Town', unlockCost: 2000, trafficMin: 250, trafficMax: 750, minVariety: 3 },
-  city: { label: 'City', unlockCost: 25000, trafficMin: 1000, trafficMax: 5000, minVariety: 4 },
+  town: { label: 'Town', unlockCost: 2000, trafficMin: 300, trafficMax: 500, minVariety: 3 },
+  city: { label: 'City', unlockCost: 25000, trafficMin: 1200, trafficMax: 1800, minVariety: 4 },
 };
 
 // A crop counts toward the variety minimum only with at least this many units offered for sale
