@@ -22,6 +22,9 @@ import {
   HARVEST_SIZE_BONUSES,
   MARKET_BASE_BUY_RATE,
   MARKET_DEMAND_WEIGHTS,
+  MARKET_FLOOD_FACTOR,
+  MARKET_FLOOD_MAX,
+  MARKET_FLOOD_RECOVERY,
   MARKET_LOCATIONS,
   MARKET_PRICE_SENSITIVITY,
   MARKET_PRICE_STEP_SHARE,
@@ -494,6 +497,8 @@ function createMarketState(overrides = {}) {
     trafficMax: profile.trafficMax,
     prices: { ...CROP_BASE_PRICES },
     keep: {},
+    // Market memory: flood[locationKey][crop], see MARKET_FLOOD_FACTOR.
+    flood: {},
     pendingSale: [],
     lastSummary: 'No sales run yet.',
     simulating: false,
@@ -548,6 +553,46 @@ function getBuyChance(price, basePrice) {
   return 1 / (1 + baseOdds * Math.exp(MARKET_PRICE_SENSITIVITY * (priceRatio - 1)));
 }
 
+// Customers the market normally has for a crop: its share of the average traffic.
+function getNormalDemand(locationKey, crop) {
+  const profile = MARKET_LOCATIONS[locationKey];
+  const weights = MARKET_DEMAND_WEIGHTS[locationKey] ?? {};
+  const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
+  const demandShare = totalWeight > 0 ? (weights[crop] ?? 0) / totalWeight : 0;
+  return ((profile.trafficMin + profile.trafficMax) / 2) * demandShare;
+}
+
+function getFlood(locationKey, crop) {
+  return state.market.flood[locationKey]?.[crop] ?? 0;
+}
+
+// The price customers here judge a crop by: its base price, lowered while the market is flooded with it.
+function getReferencePrice(locationKey, crop) {
+  return CROP_BASE_PRICES[crop] * (1 - getFlood(locationKey, crop));
+}
+
+// After a sale: the crops sold flood this market, then every market recovers a little. Tiny
+// leftovers are dropped so the save stays small.
+function updateMarketFlood(locationKey, cropSales) {
+  for (const [crop, sale] of Object.entries(cropSales)) {
+    const normalDemand = getNormalDemand(locationKey, crop);
+    if (normalDemand > 0) {
+      const flood = getFlood(locationKey, crop) + (sale.quantity / normalDemand) * (MARKET_FLOOD_FACTOR[locationKey] ?? 0);
+      state.market.flood[locationKey] = { ...state.market.flood[locationKey], [crop]: Math.min(MARKET_FLOOD_MAX, flood) };
+    }
+  }
+  recoverMarketFlood();
+}
+
+function recoverMarketFlood() {
+  state.market.flood = Object.fromEntries(Object.entries(state.market.flood).map(([locationKey, crops]) => [
+    locationKey,
+    Object.fromEntries(Object.entries(crops)
+      .map(([crop, flood]) => [crop, flood * (1 - MARKET_FLOOD_RECOVERY)])
+      .filter(([, flood]) => flood >= 0.01)),
+  ]));
+}
+
 // What the player is told before selling a crop at `price` here: how many customers want it (for the
 // market's lowest and highest traffic) and the share who buy at this price. Working out how many units
 // that sells is left to the player.
@@ -556,7 +601,7 @@ function getDemandForecast(locationKey, crop, price) {
   const weights = MARKET_DEMAND_WEIGHTS[locationKey] ?? {};
   const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
   const demandShare = totalWeight > 0 ? (weights[crop] ?? 0) / totalWeight : 0;
-  const buyChance = getBuyChance(price, CROP_BASE_PRICES[crop]);
+  const buyChance = getBuyChance(price, getReferencePrice(locationKey, crop));
   return {
     wanted: {
       min: Math.round(profile.trafficMin * demandShare),
@@ -715,6 +760,8 @@ function buildMarketCustomerSimulation(profile, selectedCrops, options = {}) {
     if (stock > 0) {
       seller.assortment[crop] = {
         price: Math.max(1, Number(state.market.prices[crop] ?? CROP_BASE_PRICES[crop])),
+        referencePrice: getReferencePrice(state.market.location, crop),
+        flood: getFlood(state.market.location, crop),
         stock,
         initialStock: stock,
         wanted: 0,
@@ -742,7 +789,7 @@ function buildMarketCustomerSimulation(profile, selectedCrops, options = {}) {
 
     seller.customers += 1;
     offer.served += 1;
-    const bought = random() < getBuyChance(offer.price, CROP_BASE_PRICES[crop]);
+    const bought = random() < getBuyChance(offer.price, offer.referencePrice);
 
     if (bought) {
       offer.stock -= 1;
@@ -808,6 +855,7 @@ function finalizeMarketSimulation(profile, simulation) {
     state.cropInventory[crop] = units - getSpoiledUnits(units);
   }
   state.market.keep = {};
+  updateMarketFlood(simulation.locationKey ?? state.market.location, playerSeller.cropSales);
   state.coins += totalRevenue + contractRewards;
   state.lastHarvestUnits = simulation.unitsBrought ?? state.lastHarvestUnits;
   state.lastHarvestCrops = simulation.harvestedCrops ?? state.lastHarvestCrops;
@@ -900,6 +948,7 @@ function skipSeason() {
   }
 
   state.cropInventory = createCropInventoryState();
+  recoverMarketFlood();
   advanceTime();
   startNextSeason();
   state.market.lastSummary = 'Season skipped. The harvest and the field were discarded.';
@@ -1007,6 +1056,7 @@ function createSale(profile) {
 
   return {
     ...buildMarketCustomerSimulation(profile, selectedCrops),
+    locationKey: state.market.location,
     contracts,
     kept,
     unitsBrought,
@@ -1042,7 +1092,6 @@ function startSelling() {
     simulation,
     timeline: buildSaleTimeline(simulation, {
       emojis: CROP_EMOJIS,
-      basePrices: CROP_BASE_PRICES,
       msPerCustomer: SALE_DAY_MS_PER_CUSTOMER,
       minMs: SALE_DAY_MIN_MS,
       maxMs: SALE_DAY_MAX_MS,
@@ -2209,6 +2258,9 @@ function renderMarketPanel() {
                           <p class="market-forecast" title="Expected for this market's lowest and highest traffic">
                             📊 ${formatRange(forecast.wanted)} customers want ${item} · ~${Math.round(forecast.buyChance * 100)}% buy at this price
                           </p>
+                          ${getFlood(state.market.location, item) >= MIN_SHOWN_FLOOD ? `
+                            <p class="market-flood">🥱 ${profile.label} has had plenty of ${item} lately: customers pay ~${Math.round(getFlood(state.market.location, item) * 100)}% less</p>
+                          ` : ''}
                         ` : `
                           <p class="empty-sale">${profile.label} customers don't buy ${item}. Any you don't keep will spoil.</p>
                         `}
@@ -2323,6 +2375,8 @@ function renderGameOverScreen() {
 }
 
 const SALE_TIP_ICONS = { up: '📈', ok: '✅', down: '📉', less: '📦' };
+// Smaller floods are left unmentioned.
+const MIN_SHOWN_FLOOD = 0.05;
 
 // The market stall with its stock, a day clock and the coins taken. Walkers and the numbers are
 // updated each frame by updateSaleStage; this renders the current moment of the day.
@@ -2427,6 +2481,9 @@ function renderSaleSimulationScreen() {
                             <span>${offer.stock}</span>
                           </div>
                           ${tip ? `<p class="sale-tip tip-${tip.kind}">${SALE_TIP_ICONS[tip.kind]} ${tip.text}</p>` : ''}
+                          ${(offer.flood ?? 0) >= MIN_SHOWN_FLOOD ? `
+                            <p class="sale-tip tip-flood">🥱 ${profile.label} was flooded with ${crop}: customers paid ~${Math.round(offer.flood * 100)}% less. Selling it elsewhere or skipping a visit lets it recover.</p>
+                          ` : ''}
                         `;
                       }).join('')}
                     </div>
@@ -2895,6 +2952,7 @@ export {
   getHarvestYield,
   getMarketLocationProfile,
   getNextGoal,
+  getReferencePrice,
   getUpgradeCost,
   getVarietyCount,
   holdBlock,

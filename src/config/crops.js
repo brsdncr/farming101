@@ -82,6 +82,15 @@ export const MIN_UNITS_FOR_VARIETY = 3;
 export const MARKET_BASE_BUY_RATE = 0.7;
 export const MARKET_PRICE_SENSITIVITY = 4;
 
+// Market memory: selling a crop floods that market for a while, and its customers pay less for it.
+// A sale adds (units sold ÷ the market's normal demand for the crop) × the market's MARKET_FLOOD_FACTOR;
+// after every market visit each market's flooding shrinks by MARKET_FLOOD_RECOVERY. A crop flooded by
+// 0.3 is bought as if its base price were 30% lower. Repeating the same visit settles at about the
+// flood one sale adds. The Village is exempt: early on it is the only market, so there is no way out.
+export const MARKET_FLOOD_FACTOR = { village: 0, town: 1.5, city: 1.5 };
+export const MARKET_FLOOD_RECOVERY = 0.5;
+export const MARKET_FLOOD_MAX = 0.6;
+
 // The price − / + buttons move the price by this share of the crop's base price (at least 1 coin),
 // so every crop needs about the same number of clicks.
 export const MARKET_PRICE_STEP_SHARE = 0.1;

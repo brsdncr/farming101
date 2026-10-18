@@ -18,7 +18,9 @@ const SOLD_OUT_VISITORS_CAP = 12;
 const PASSERS_BY_GAP_MS = 900;
 const DAY_START_HOUR = 8;
 const DAY_HOURS = 10;
-const PRICEY_RATIO = 1.15; // above this share of the base price, a customer who passes calls it pricey
+// Above this share of the price customers judge by (the base price, lower in a flooded market), a
+// customer who passes calls it pricey.
+const PRICEY_RATIO = 1.15;
 
 // People with a natural skin tone: the modifier goes right after the base emoji, before any
 // joined part (👩 + 🏽 + ‍🦰 is a red-haired woman with a medium skin tone).
@@ -39,7 +41,7 @@ function sampleEvenly(items, cap) {
 
 // Builds the day's schedule from a finished simulation. Customers arrive in their simulated order,
 // spread over the day; once every crop is sold out the market closes early.
-export function buildSaleTimeline(simulation, { emojis, basePrices, msPerCustomer, minMs, maxMs }) {
+export function buildSaleTimeline(simulation, { emojis, msPerCustomer, minMs, maxMs }) {
   const needs = simulation.customerNeeds ?? [];
   const traffic = Math.max(1, needs.length);
   const offers = simulation.sellers[0]?.assortment ?? {};
@@ -62,7 +64,7 @@ export function buildSaleTimeline(simulation, { emojis, basePrices, msPerCustome
 
   const visitorCap = Math.max(1, Math.round(activeMs / VISITOR_GAP_MS));
   const walkers = sampleEvenly(events, visitorCap).map((event) => {
-    const pricey = event.price > basePrices[event.crop] * PRICEY_RATIO;
+    const pricey = event.price > offers[event.crop].referencePrice * PRICEY_RATIO;
     return {
       lane: 'front',
       at: arrivalAt(event.customerIndex),

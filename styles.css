@@ -1215,6 +1215,19 @@ h1 {
   line-height: 1.35;
 }
 
+.market-flood {
+  margin: 0;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgba(240, 165, 49, 0.18);
+  color: var(--text);
+  font-size: 0.76rem;
+}
+
+.sale-tip.tip-flood {
+  background: rgba(240, 165, 49, 0.18);
+}
+
 .price-change {
   color: var(--muted);
   font-size: 0.8em;

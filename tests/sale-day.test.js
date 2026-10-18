@@ -23,7 +23,6 @@ function seededRandom(seed) {
 
 const TIMELINE_OPTIONS = {
   emojis: CROP_EMOJIS,
-  basePrices: CROP_BASE_PRICES,
   msPerCustomer: SALE_DAY_MS_PER_CUSTOMER,
   minMs: SALE_DAY_MIN_MS,
   maxMs: SALE_DAY_MAX_MS,
