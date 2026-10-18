@@ -82,6 +82,17 @@ export const MIN_UNITS_FOR_VARIETY = 3;
 export const MARKET_BASE_BUY_RATE = 0.7;
 export const MARKET_PRICE_SENSITIVITY = 4;
 
+// The price − / + buttons move the price by this share of the crop's base price (at least 1 coin),
+// so every crop needs about the same number of clicks.
+export const MARKET_PRICE_STEP_SHARE = 0.1;
+
+// The sale plays as a time-compressed market day. Its length (at 1× speed) grows with the customers
+// who reach the stall, within these limits; the day closes early once everything is sold out.
+export const SALE_DAY_MS_PER_CUSTOMER = 150;
+export const SALE_DAY_MIN_MS = 10000;
+export const SALE_DAY_MAX_MS = 20000;
+export const SALE_DAY_SPEEDS = [1, 2, 4];
+
 // Barn: keep harvested crops for a later market visit instead of selling them now. Kept crops come
 // back as harvest next visit, minus BARN_SPOILAGE of each crop (rounded up). Capacity is upgradable.
 export const BARN_LEVELS = [

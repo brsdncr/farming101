@@ -172,12 +172,14 @@ test('skipping the sale animation stops the customer loop', (t) => {
   const simulation = app.state.market.activeSimulation;
   app.state.market.skipAnimation = true;
   app.finalizeMarketSimulation(app.getMarketLocationProfile(), simulation);
-  const indexAfterSkip = app.state.market.currentCustomerIndex;
+  const coinsAfterSkip = app.state.coins;
+  const roundAfterSkip = app.state.round;
   const summaryAfterSkip = app.state.market.lastSummary;
 
   t.mock.timers.tick(60000);
 
-  assert.equal(app.state.market.currentCustomerIndex, indexAfterSkip);
+  assert.equal(app.state.coins, coinsAfterSkip, 'the sale is paid once');
+  assert.equal(app.state.round, roundAfterSkip);
   assert.equal(app.state.market.lastSummary, summaryAfterSkip);
 });
 

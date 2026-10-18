@@ -212,7 +212,9 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 
   * Crops the selected market does not buy are marked as spoiling.
 
-* **Price:** Adjust each crop's unit price with − / +. The panel shows the expected share of buyers at that price (e.g. "Price: 13 · ~53% of buyers" for Tomato, base price 11).
+* **Price:** Adjust each crop's unit price with − / +, in steps of 10% of its base price (at least 1 coin), so every crop takes about the same number of clicks. The change from the base price is shown next to it (e.g. "Price: 308 +10%").
+
+* **📊 Forecast:** Below each price: how many customers want the crop, for the market's lowest and highest traffic, and the share who buy at this price (e.g. "23–45 customers want tomato · ~70% buy at this price"). Whether that sells out the stock is deliberately not shown: working it out is the pricing decision.
 
 * **Status:** The panel shows variety progress (e.g. "Variety: 2/2 crop types with 3+ units"), customer traffic, and why selling is blocked, if it is.
 
@@ -220,7 +222,7 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 
 ### 6.3 Sales Simulation Logic
 
-* Clicking **Start Selling** runs the simulation and plays it as an animation (skippable after 3 seconds).
+* Clicking **Start Selling** runs the simulation, then plays it as a **market day** in the spirit of Lemonade Tycoon (see §6.5). The result is fixed before the day starts.
 
 * **Traffic:** A random number of customers within the market's traffic range visits.
 
@@ -249,6 +251,25 @@ After the sale, a summary shows revenue per crop and a funnel for the player's s
 * **Sold:** Of those, customers who accepted the price and bought.
 
 * Gaps in the funnel point to the fix: Wanted ≫ Served means the crop sold out (raise prices or grow more); Served ≫ Sold means the price was too high.
+
+* **Tips:** Each crop in the stock ledger gets one line of advice:
+
+  * 📈 Sold out before 60% of the interested customers were served: charge more or bring more.
+  * ✅ Sold out later than that: the price looks right.
+  * 📉 Fewer than half of the customers served bought: try a lower price. Or, with enough interested customers for the whole stock but some left over: a slightly lower price would sell them.
+  * 📦 Too few customers wanted it: bring fewer, or sell some at another market.
+
+### 6.5 Market Day Animation
+
+* **Scene:** A striped stall in a street. The stall shows each crop's stock, which counts down as units sell and greys out when sold out. A clock runs from 08:00 to 18:00 and a counter shows the coins taken.
+
+* **Customers:** People emojis with varied natural skin tones. They arrive in their simulated order, spread over the day, from both sides. Stall visitors stop at the stall with a speech bubble: the crop and the coins paid, "Too pricey!" (price above 115% of base) or "Not today", and "No 🍅 left" for customers who came after that crop sold out. Passers-by who wanted a crop the player didn't bring stroll past behind the stall, some thinking of it ("🍉?").
+
+* **Sampling:** Only a sample of customers is shown (about one stall visitor per 0.55 s of the day), so big markets stay readable; the stock and coin counters still count every sale.
+
+* **Length:** 150 ms per customer served, between 10 and 20 seconds at 1×. When every crop sells out, the market closes early ("Sold out! Closing early"); otherwise at sunset.
+
+* **Controls:** ⏩ cycles the speed through 1×, 2× and 4× (kept for later days in the session). **Skip to results** settles the sale at once (enabled after 3 seconds). The report replaces the scene when the day ends.
 
 ### 6.5 Contracts
 
