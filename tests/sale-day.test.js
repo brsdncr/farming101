@@ -56,11 +56,11 @@ test('price buttons step by 10% of the base price, at least 1 coin', () => {
 
 test('the forecast covers the market traffic range and the share who buy at the price', () => {
   freshState();
-  // Village tomato demand is 5/11 of 50–100 customers.
+  // Village tomato demand is 5/11 of 50–100 customers. A new game starts in summer, tomato's season.
   const forecast = app.getDemandForecast('village', 'tomato', CROP_BASE_PRICES.tomato);
 
   assert.deepEqual(forecast.wanted, { min: 23, max: 45 });
-  assert.ok(Math.abs(forecast.buyChance - 0.7) < 1e-9);
+  assert.ok(Math.abs(forecast.buyChance - app.getBuyChance(11, 11 * 1.2)) < 1e-9);
 });
 
 test('the market panel shows the price change and the forecast', () => {
@@ -69,7 +69,8 @@ test('the market panel shows the price change and the forecast', () => {
   app.state.marketOpen = true;
   app.render();
   assert.match(appElement.innerHTML, /base price/);
-  assert.match(appElement.innerHTML, /📊 23–45 customers want tomato · ~70% buy at this price/);
+  const buyShare = Math.round(app.getBuyChance(11, 11 * 1.2) * 100);
+  assert.match(appElement.innerHTML, new RegExp(`📊 23–45 customers want tomato · ~${buyShare}% buy at this price`));
   assert.doesNotMatch(appElement.innerHTML, /sells out|sells \d/, 'how many units sell is left to the player');
 
   app.adjustMarketPrice(1, 'tomato');

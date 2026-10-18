@@ -29,6 +29,7 @@ import {
   MARKET_PRICE_SENSITIVITY,
   MARKET_PRICE_STEP_SHARE,
   MIN_UNITS_FOR_VARIETY,
+  OFF_SEASON_PRICE_PENALTY,
   SALE_DAY_MAX_MS,
   SALE_DAY_MIN_MS,
   SALE_DAY_MS_PER_CUSTOMER,
@@ -36,11 +37,14 @@ import {
   SEED_LEVEL_YIELD_BONUS,
   SEED_UPGRADE_COST_FACTOR,
   SEED_UPGRADE_COST_GROWTH,
+  SEASON_PRICE_BONUS,
+  SEASONAL_CROPS,
 } from './src/config/crops.js';
 import {
   DEATH_AGE,
   GOAL_COINS,
   HOLD_SLOT_COST,
+  SEASON_EMOJIS,
   SEASONS,
   START_AGE,
   VISITS_PER_SEASON,
@@ -566,9 +570,39 @@ function getFlood(locationKey, crop) {
   return state.market.flood[locationKey]?.[crop] ?? 0;
 }
 
-// The price customers here judge a crop by: its base price, lowered while the market is flooded with it.
+function getCropSeason(crop) {
+  return SEASONS.find((season) => SEASONAL_CROPS[season]?.includes(crop)) ?? null;
+}
+
+function isInSeason(crop, season = state.season) {
+  return getCropSeason(crop) === season;
+}
+
+// Market visits left in the current season, this one included.
+function getVisitsLeftInSeason() {
+  return VISITS_PER_SEASON - ((state.round - 1) % VISITS_PER_SEASON);
+}
+
+function capitalize(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// "☀️ Summer crop · +20%" in season, "❄️ Winter crop · −20%" out of season.
+function describeCropSeason(crop) {
+  const season = getCropSeason(crop);
+  const change = isInSeason(crop) ? `+${Math.round(SEASON_PRICE_BONUS * 100)}%` : `−${Math.round(OFF_SEASON_PRICE_PENALTY * 100)}%`;
+  return `${SEASON_EMOJIS[season]} ${capitalize(season)} crop · ${change}`;
+}
+
+// How the season changes what customers pay for a crop.
+function getSeasonFactor(crop) {
+  return isInSeason(crop) ? 1 + SEASON_PRICE_BONUS : 1 - OFF_SEASON_PRICE_PENALTY;
+}
+
+// The price customers here judge a crop by: its base price, adjusted for the season and lowered while
+// the market is flooded with it.
 function getReferencePrice(locationKey, crop) {
-  return CROP_BASE_PRICES[crop] * (1 - getFlood(locationKey, crop));
+  return CROP_BASE_PRICES[crop] * getSeasonFactor(crop) * (1 - getFlood(locationKey, crop));
 }
 
 // After a sale: the crops sold flood this market, then every market recovers a little. Tiny
@@ -2022,7 +2056,9 @@ function renderCropTiles(goalLabel) {
         action: 'select-crop',
         data: `data-shop-crop="${crop}"`,
         classes: [crop === selected && 'selected'],
-        title: `${config.label}: seeds and upgrades`,
+        // The Shop opens after a visit, so state.season is already the season of the next visit.
+        title: `${config.label}: seeds and upgrades${isInSeason(crop) ? ` · in season at the next market visit (+${Math.round(SEASON_PRICE_BONUS * 100)}%)` : ''}`,
+        badge: isInSeason(crop) ? SEASON_EMOJIS[state.season] : '',
       });
     }
 
@@ -2239,6 +2275,7 @@ function renderMarketPanel() {
                           </button>
                         </div>
                         <div class="market-crop-counts">
+                          ${soldHere ? `<span class="season-chip ${isInSeason(item) ? 'in-season' : 'off-season'}" title="Customers pay ${isInSeason(item) ? 'more for crops in season' : 'less for crops out of season'}">${describeCropSeason(item)}</span>` : ''}
                           <span class="market-crop-count">Harvest: ${state.cropInventory[item]}</span>
                         </div>
                       </div>
@@ -2552,7 +2589,9 @@ function render() {
         </div>
         <div class="hud">
           <div class="stat"><span>Round</span><strong>${state.round}</strong></div>
-          <div class="stat"><span>Season</span><strong>${state.season}</strong></div>
+          <div class="stat" title="${capitalize(state.season)} crops sell for ${Math.round(SEASON_PRICE_BONUS * 100)}% more, the others for ${Math.round(OFF_SEASON_PRICE_PENALTY * 100)}% less">
+            <span>Season</span><strong>${SEASON_EMOJIS[state.season]} ${capitalize(state.season)}${getVisitsLeftInSeason() === 1 ? ' <small>(last visit)</small>' : ''}</strong>
+          </div>
           <div class="stat"><span>Age</span><strong>${state.age}</strong></div>
           <div class="stat" title="Reach ${GOAL_COINS.toLocaleString('en-US')} coins before age ${DEATH_AGE}"><span>Coins / Goal</span><strong>${state.coins.toLocaleString('en-US')} / 1M</strong></div>
           ${renderNextGoal()}

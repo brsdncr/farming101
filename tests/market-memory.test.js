@@ -70,16 +70,18 @@ test('flooding is capped', () => {
 test('customers judge a flooded crop by a lower price', () => {
   freshState();
   app.state.market.location = 'city';
+  // Summer: watermelon is in season (×1.2), then flooded by 30%.
+  const flooded = 280 * 1.2 * 0.7;
   const fresh = app.getDemandForecast('city', 'watermelon', 280).buyChance;
   app.state.market.flood = { city: { watermelon: 0.3 } };
 
-  assert.ok(Math.abs(app.getReferencePrice('city', 'watermelon') - 196) < 1e-9);
+  assert.ok(Math.abs(app.getReferencePrice('city', 'watermelon') - flooded) < 1e-9);
   assert.ok(app.getDemandForecast('city', 'watermelon', 280).buyChance < fresh);
   assert.ok(Math.abs(app.getDemandForecast('city', 'watermelon', 196).buyChance - fresh) < 1e-9);
 
   app.state.cropInventory.watermelon = 10;
   const simulation = app.buildMarketCustomerSimulation(app.getMarketLocationProfile(), ['watermelon']);
-  assert.ok(Math.abs(simulation.sellers[0].assortment.watermelon.referencePrice - 196) < 1e-9);
+  assert.ok(Math.abs(simulation.sellers[0].assortment.watermelon.referencePrice - flooded) < 1e-9);
   assert.equal(CROP_BASE_PRICES.watermelon, 280, 'the base price itself is unchanged');
 });
 

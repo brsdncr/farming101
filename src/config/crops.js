@@ -91,6 +91,11 @@ export const MARKET_FLOOD_FACTOR = { village: 0, town: 1.5, city: 1.5 };
 export const MARKET_FLOOD_RECOVERY = 0.5;
 export const MARKET_FLOOD_MAX = 0.6;
 
+// Seasonal demand: customers pay more for crops in season (SEASONAL_CROPS) and less out of season.
+// With today's crop values this shifts income between seasons rather than changing what is grown.
+export const SEASON_PRICE_BONUS = 0.2;
+export const OFF_SEASON_PRICE_PENALTY = 0.2;
+
 // The price − / + buttons move the price by this share of the crop's base price (at least 1 coin),
 // so every crop needs about the same number of clicks.
 export const MARKET_PRICE_STEP_SHARE = 0.1;

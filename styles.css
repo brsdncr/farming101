@@ -1215,6 +1215,24 @@ h1 {
   line-height: 1.35;
 }
 
+.season-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.season-chip.in-season {
+  background: rgba(157, 191, 61, 0.28);
+  color: var(--accent);
+}
+
+.season-chip.off-season {
+  background: rgba(201, 235, 242, 0.8);
+  color: #3f7d8c;
+}
+
 .market-flood {
   margin: 0;
   padding: 3px 8px;

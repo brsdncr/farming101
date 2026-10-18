@@ -119,11 +119,17 @@ Tomato and Carrot are the cheap starter crops and are unlocked from the start. A
 
 ### 4.3 Seasonal Crops
 
-The calendar alternates between summer and winter (see §7). The crops are grouped by season for future seasonal mechanics; seasons currently have no gameplay effect.
+The calendar alternates between summer and winter (see §7), two market visits each.
 
 * **Winter Crops:** Pumpkin, Carrot, Onion, Beetroot.
 
 * **Summer Crops:** Cherry, Watermelon, Tomato, Eggplant.
+
+* **Seasonal Demand:** Customers pay **20% more** for crops in season and **20% less** for crops out of season: the reference price (see §6.3) is the base price × 1.2 or × 0.8, combined with any market flooding (§6.8).
+
+* **Shown:** The top bar shows the season with its emoji ("☀️ Summer", "❄️ Winter") and "(last visit)" on a season's final visit. In the Marketplace each crop has a chip ("☀️ Summer crop · +20%" or "❄️ Winter crop · −20%"), and the forecast includes the effect. In the Seed Shop, crops that will be in season at the next visit carry the season's emoji.
+
+* **Balance:** The effect is flavour rather than strategy: it moves income between seasons but doesn't change what is worth growing. The summer crops include the three most valuable ones, and even out of season watermelon (−20%: 224) is worth far more than onion in season (+20%: 59), winter's best crop. Stronger effects were tested (up to +50% / −50%): the bot still grew the same crops all year and careers only got slower. Seasons could really change play after a winter-crop rebalance, and ideally the seed bag, since switching crop sets every season would mix both seasons' seeds into the blocks.
 
 ## 5. Harvest System
 
@@ -236,7 +242,7 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
 | **Buyers** | 94% | 86% | **70%** | 46% | 24% | 4% |
 
-* **Reference Price:** The crop's base price, lowered while the market is flooded with it (see §6.8).
+* **Reference Price:** The crop's base price, adjusted for the season (§4.3) and lowered while the market is flooded with it (§6.8).
 
 * **Pricing Strategy:** When demand exceeds stock, raising the price earns more while still selling out. When stock exceeds demand, lowering the price sells more.
 
@@ -417,10 +423,12 @@ The economy is tuned with a headless simulation that plays whole careers with th
 
 | Tiles per Visit | 40 | 60 | 100 | 160 |
 | ----- | ----- | ----- | ----- | ----- |
-| **Reached 1,000,000** | 0/40 | 30/40 | 40/40 | 37/40 |
-| **Median Age at 1,000,000** | — | 79 | 69 | 74 |
+| **Reached 1,000,000** | 0/40 | 35/40 | 39/40 | 37/40 |
+| **Median Age at 1,000,000** | — | 78 | 69 | 75 |
 
-* Town is typically unlocked around age 21 and City around age 26–31.
+* Town is typically unlocked around age 21 and City around age 27–32.
+
+* **Seasonal demand** (§4.3, ±20%) is close to balance-neutral: before it, the results were 30/40 at age 79, 40/40 at 69 and 37/40 at 74.
 
 * **Market memory** (§6.8) costs about 11 years at 100 tiles per visit: without it the results were 38/40 at age 68, 40/40 at 58 and 40/40 at 60.
 
