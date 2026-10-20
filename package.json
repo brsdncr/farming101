@@ -10,7 +10,8 @@
     "dist:mac": "electron-builder --mac dmg",
     "dist:win": "electron-builder --win nsis --x64",
     "test": "node --test",
-    "balance": "node scripts/balance.mjs"
+    "balance": "node scripts/balance.mjs",
+    "build:web": "node scripts/build-web.mjs"
   },
   "build": {
     "toolsets": {
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "electron": "^44.7.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2"
   }
 }

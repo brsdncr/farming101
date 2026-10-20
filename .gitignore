@@ -1,5 +1,6 @@
 # Build outputs
 dist/
+www/
 out/
 release/
 
