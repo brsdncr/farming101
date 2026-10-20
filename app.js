@@ -543,6 +543,18 @@ function getOfferedUnits(locationKey) {
   ]));
 }
 
+// Units of each crop customers will be offered here, worked out as createSale does: kept units are
+// set aside first, then a contract for this market takes its whole quantity if enough is left.
+function getUnitsForSale(locationKey) {
+  const units = getOfferedUnits(locationKey);
+  for (const contract of state.contracts.active) {
+    if (contract.locationKey === locationKey && (units[contract.crop] ?? 0) >= contract.quantity) {
+      units[contract.crop] -= contract.quantity;
+    }
+  }
+  return units;
+}
+
 // Crop types on sale here with enough units to count toward the variety minimum. Crops kept in the
 // barn don't count: the rule is about what is actually sold.
 function getVarietyCount(locationKey) {
@@ -705,8 +717,15 @@ function setKeep(cropKey, quantity) {
   render();
 }
 
+// Steps along multiples of `delta` (5): from 27, − goes to 25 rather than 22. setKeep then caps the
+// value at what can be kept, so + from 25 with 27 harvested gives 27.
 function adjustKeep(cropKey, delta) {
-  setKeep(cropKey, (state.market.keep[cropKey] ?? 0) + delta);
+  const step = Math.abs(delta);
+  const current = state.market.keep[cropKey] ?? 0;
+  const next = delta > 0
+    ? (Math.floor(current / step) + 1) * step
+    : (Math.ceil(current / step) - 1) * step;
+  setKeep(cropKey, next);
 }
 
 function buyBarnUpgrade() {
@@ -903,6 +922,7 @@ function finalizeMarketSimulation(profile, simulation) {
     totalSold: simulation.totalSold,
     totalRevenue: simulation.totalRevenue,
     contracts,
+    kept: simulation.kept ?? {},
   };
   state.market.skipAnimation = false;
   state.market.skipAnimationEnabledAt = 0;
@@ -2234,6 +2254,7 @@ function renderMarketPanel() {
   const productPool = getMarketProductPool(state.market.location);
   const harvestedCrops = CROP_KEYS.filter((item) => (state.cropInventory[item] ?? 0) > 0);
   const variety = getVarietyCount(state.market.location);
+  const unitsForSale = getUnitsForSale(state.market.location);
   const sellingBlocker = getSellingBlocker();
   const sellDisabled = state.market.simulating || !canStartSelling();
 
@@ -2277,13 +2298,14 @@ function renderMarketPanel() {
                         <div class="market-crop-counts">
                           ${soldHere ? `<span class="season-chip ${isInSeason(item) ? 'in-season' : 'off-season'}" title="Customers pay ${isInSeason(item) ? 'more for crops in season' : 'less for crops out of season'}">${describeCropSeason(item)}</span>` : ''}
                           <span class="market-crop-count">Harvest: ${state.cropInventory[item]}</span>
+                          ${soldHere && unitsForSale[item] !== state.cropInventory[item] ? `<span class="market-crop-count on-sale" title="Harvest minus what you keep and what a contract takes">On sale: ${unitsForSale[item]}</span>` : ''}
                         </div>
                       </div>
 
                       <div class="market-crop-controls">
                         <div class="selector-row small-inline barn-row">
                           <button type="button" class="small-button" data-market-crop="${item}" data-market-action="keep-dec" ${state.market.simulating ? 'disabled' : ''} aria-label="Keep fewer">-</button>
-                          <span>🛖 Keep for later: <strong>${state.market.keep[item] ?? 0}</strong></span>
+                          <span>🛖 Keep for later: <strong>${state.market.keep[item] ?? 0}</strong>${state.market.keep[item] ? ` <span class="keep-return" title="${Math.round(BARN_SPOILAGE * 100)}% of kept crops spoil">(${state.market.keep[item] - getSpoiledUnits(state.market.keep[item])} come back)</span>` : ''}</span>
                           <button type="button" class="small-button" data-market-crop="${item}" data-market-action="keep-inc" ${state.market.simulating ? 'disabled' : ''} aria-label="Keep more">+</button>
                         </div>
                         ${soldHere ? `
@@ -2415,6 +2437,26 @@ function renderGameOverScreen() {
 const ICON_MENU = '<svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14" /></svg>';
 const ICON_CLOSE = '<svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>';
 
+// Why "On sale" is lower than the harvest, when it is: "🌾 14 harvested · 📜 10 to a contract".
+function renderSetAsideNote(crop, offer, report) {
+  const contractUnits = (report.contracts ?? [])
+    .filter((contract) => contract.crop === crop)
+    .reduce((sum, contract) => sum + contract.quantity, 0);
+  const keptUnits = report.kept?.[crop] ?? 0;
+  if (contractUnits === 0 && keptUnits === 0) {
+    return '';
+  }
+
+  const parts = [`🌾 ${offer.initialStock + contractUnits + keptUnits} harvested`];
+  if (contractUnits > 0) {
+    parts.push(`📜 ${contractUnits} to a contract`);
+  }
+  if (keptUnits > 0) {
+    parts.push(`🛖 ${keptUnits} kept`);
+  }
+  return `<p class="sale-set-aside">${parts.join(' · ')}</p>`;
+}
+
 const SALE_TIP_ICONS = { up: '📈', ok: '✅', down: '📉', less: '📦' };
 // Smaller floods are left unmentioned.
 const MIN_SHOWN_FLOOD = 0.05;
@@ -2503,7 +2545,7 @@ function renderSaleSimulationScreen() {
                       <strong>${seller.name} stock ledger</strong>
                       <div class="sale-report-crop-header">
                         <span>Crop</span>
-                        <span>Stocked</span>
+                        <span title="Units offered to customers: the harvest minus what you kept and what contracts took">On sale</span>
                         <span>Sold</span>
                         <span>Unit price</span>
                         <span>Revenue</span>
@@ -2521,6 +2563,7 @@ function renderSaleSimulationScreen() {
                             <span>+${sale?.revenue ?? 0} coins</span>
                             <span>${offer.stock}</span>
                           </div>
+                          ${renderSetAsideNote(crop, offer, report)}
                           ${tip ? `<p class="sale-tip tip-${tip.kind}">${SALE_TIP_ICONS[tip.kind]} ${tip.text}</p>` : ''}
                           ${(offer.flood ?? 0) >= MIN_SHOWN_FLOOD ? `
                             <p class="sale-tip tip-flood">🥱 ${profile.label} was flooded with ${crop}: customers paid ~${Math.round(offer.flood * 100)}% less. Selling it elsewhere or skipping a visit lets it recover.</p>
@@ -2998,6 +3041,7 @@ export {
   getMarketLocationProfile,
   getNextGoal,
   getReferencePrice,
+  getUnitsForSale,
   getUpgradeCost,
   getVarietyCount,
   holdBlock,

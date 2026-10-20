@@ -128,3 +128,46 @@ test('quitting mid-sale keeps a delivered contract paid exactly once', (t) => {
   assert.equal(app.state.coins, 20 + contract.reward + revenue);
   assert.equal(app.state.contracts.active.length, 0);
 });
+
+test('units on sale match what the sale offers, after kept units and contracts', () => {
+  const cases = [
+    { tomato: 14, keep: 0, contract: 10 },
+    { tomato: 20, keep: 5, contract: 10 },
+    // Keeping 5 leaves 9, too few for the 10-tomato contract, so it isn't delivered.
+    { tomato: 14, keep: 5, contract: 10 },
+    { tomato: 12, keep: 0, contract: 0 },
+  ];
+
+  for (const { tomato, keep, contract } of cases) {
+    freshState();
+    if (contract) {
+      acceptVillageContract({ crop: 'tomato', quantity: contract });
+    }
+    app.state.cropInventory.tomato = tomato;
+    app.state.cropInventory.carrot = 6;
+    app.setKeep('tomato', keep);
+
+    const forecast = app.getUnitsForSale('village').tomato;
+    const offered = app.createSale(app.getMarketLocationProfile()).sellers[0].assortment.tomato?.initialStock ?? 0;
+    assert.equal(forecast, offered, `tomato ${tomato}, keep ${keep}, contract ${contract}`);
+  }
+});
+
+test('the market panel and the report explain why fewer units are on sale than harvested', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  freshState();
+  acceptVillageContract({ crop: 'tomato', quantity: 10 });
+  app.state.cropInventory.tomato = 14;
+  app.state.cropInventory.carrot = 6;
+  app.state.marketOpen = true;
+  app.render();
+
+  assert.match(appElement.innerHTML, /Harvest: 14<\/span>\s*<span class="market-crop-count on-sale"[^>]*>On sale: 4</);
+  assert.doesNotMatch(appElement.innerHTML, /On sale: 6/, 'carrot has nothing set aside');
+
+  app.startSelling();
+  app.finalizeMarketSimulation(app.getMarketLocationProfile(), app.state.market.activeSimulation);
+  assert.match(appElement.innerHTML, />On sale<\/span>/);
+  assert.doesNotMatch(appElement.innerHTML, /Stocked/);
+  assert.match(appElement.innerHTML, /🌾 14 harvested · 📜 10 to a contract/);
+});

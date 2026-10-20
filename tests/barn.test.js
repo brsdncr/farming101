@@ -124,3 +124,34 @@ test('crops kept in the barn do not count toward the variety minimum', () => {
   app.setKeep('carrot', 7);
   assert.equal(app.getVarietyCount('village'), 2, '3 carrots on sale is enough');
 });
+
+test('the keep stepper stays on multiples of 5, capped at what can be kept', () => {
+  freshState();
+  app.state.cropInventory.pumpkin = 27;
+  const presses = (action, times) => {
+    const values = [];
+    for (let press = 0; press < times; press += 1) {
+      app.adjustKeep('pumpkin', action === '+' ? 5 : -5);
+      values.push(app.state.market.keep.pumpkin);
+    }
+    return values;
+  };
+
+  assert.deepEqual(presses('+', 6), [5, 10, 15, 20, 25, 27]);
+  assert.deepEqual(presses('-', 3), [25, 20, 15], 'from 27, − goes to 25, not 22');
+
+  // The barn holds 30: with 8 carrots kept, at most 22 pumpkins fit.
+  app.state.cropInventory.carrot = 8;
+  app.setKeep('carrot', 8);
+  assert.deepEqual(presses('+', 2), [20, 22]);
+  assert.deepEqual(presses('-', 1), [20]);
+});
+
+test('the keep control shows how many kept units come back after spoilage', () => {
+  freshState();
+  app.state.cropInventory.pumpkin = 27;
+  app.state.marketOpen = true;
+  app.setKeep('pumpkin', 25);
+
+  assert.match(appElement.innerHTML, /Keep for later: <strong>25<\/strong> <span class="keep-return"[^>]*>\(22 come back\)/);
+});

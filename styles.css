@@ -1290,6 +1290,23 @@ h1 {
   font-size: 0.8em;
 }
 
+.sale-set-aside {
+  margin: 0 0 4px;
+  padding: 0 8px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.market-crop-count.on-sale {
+  background: rgba(240, 165, 49, 0.18);
+  border-color: var(--highlight);
+}
+
+.keep-return {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
 .sale-tip {
   margin: 0 0 4px;
   padding: 3px 8px;

@@ -195,6 +195,8 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 
 * **Minimum Variety:** A trip must put on sale at least the listed number of crop types the market buys, each with at least **3 units** on sale (crops kept in the barn don't count). This prevents relying on a single crop.
 
+  * **Contract leniency (deliberate):** Units a contract will take at this market still count toward the 3 units. Example: with 12 tomatoes and a 10-tomato contract, tomato counts as a variety crop although only 2 go on sale. Counting strictly could let a contract block a sale (and so its own delivery) unless the player grows another crop, which feels unfair, so the leniency was kept.
+
 * **Demand Weights:** Each customer wants one crop, drawn by the market's demand weights:
 
 | Crop | Village | Town | City |
@@ -212,9 +214,9 @@ Opened via the **Marketplace** button. There are no entry fees and no AI rivals;
 
 * **Location:** Select an unlocked market.
 
-* **Harvested Crops:** Every harvested crop is listed with its quantity. Everything not kept in the barn is offered for sale.
+* **Harvested Crops:** Every harvested crop is listed with its quantity. Everything not kept in the barn or taken by a contract is offered for sale. When keeping or a contract lowers what customers get, an **On sale** count is shown next to the harvest (e.g. "Harvest: 14 · On sale: 4").
 
-* **🛖 Keep for later:** Each crop has a − / + control (steps of 5) for how many units to keep in the barn (see §6.7), including crops this market doesn't buy.
+* **🛖 Keep for later:** Each crop has a − / + control for how many units to keep in the barn (see §6.7), including crops this market doesn't buy. It moves along multiples of 5, capped at what can be kept: with 27 harvested, + goes 25 → 27 and − goes 27 → 25. It shows how many come back after spoilage (e.g. "25 (22 come back)").
 
   * Crops the selected market does not buy are marked as spoiling.
 
@@ -259,6 +261,8 @@ After the sale, a summary shows revenue per crop and a funnel for the player's s
 * **Sold:** Of those, customers who accepted the price and bought.
 
 * Gaps in the funnel point to the fix: Wanted ≫ Served means the crop sold out (raise prices or grow more); Served ≫ Sold means the price was too high.
+
+* **Stock Ledger:** One row per crop on sale: **On sale** (units offered to customers), Sold, unit price, revenue and units left. When units were set aside, a note under the row explains the difference from the harvest (e.g. "🌾 14 harvested · 📜 10 to a contract", "🛖 25 kept").
 
 * **Tips:** Each crop in the stock ledger gets one line of advice:
 
@@ -309,7 +313,7 @@ Short goals between unlocks: deliver a quantity of one crop to one market within
 
 Keep harvested crops for a later market visit instead of selling them now. This deliberately relaxes the original rule that all harvested crops go to market.
 
-* **Keeping:** In the Marketplace panel, set how many units of each crop to keep (− / +, steps of 5). The panel shows the barn's fill (e.g. "Barn: 18/30").
+* **Keeping:** In the Marketplace panel, set how many units of each crop to keep (− / +, along multiples of 5). The panel shows the barn's fill (e.g. "Barn: 18/30").
 
 * **Capacity:** 30 units to start. Upgrades in the Shop: **60** (2,500) and **120** (15,000). Barn upgrades are part of the next-goal ladder.
 
